@@ -115,14 +115,15 @@ func newHarness(t *testing.T) *harness {
 func (p *Pipeline) Matcher() moderation.Matcher { return p.deps.Matcher }
 
 // reloadWords installs a moderation rule for the harness's tenant.
-func (h *harness) reloadWords(r controlplane.ModerationRule) {
+func (h *harness) reloadWords(t *testing.T, r controlplane.ModerationRule) {
+	t.Helper()
 	r.TenantID = "t1"
 	if r.Kind == "" {
 		r.Kind = controlplane.RuleKindSensitiveWord
 	}
 	r.Enabled = true
 	if err := h.pipeline.Matcher().Reload("t1", []controlplane.ModerationRule{r}); err != nil {
-		panic(err)
+		t.Fatalf("Reload rule %q: %v", r.Pattern, err)
 	}
 }
 
@@ -590,7 +591,7 @@ func TestPromotionalPatternIsFiltered(t *testing.T) {
 	h := newHarness(t)
 	h.dedupOn = false
 	h.dupContent = false
-	h.reloadWords(controlplane.ModerationRule{
+	h.reloadWords(t, controlplane.ModerationRule{
 		Pattern: "buy-now", Action: controlplane.ActionBlock,
 		Kind: controlplane.RuleKindPromotional, ID: "promo",
 	})

@@ -41,14 +41,15 @@ func (f *fanoutFixture) write(conn *Conn, out []byte) {
 	f.written[conn.ID] = append(f.written[conn.ID], cp)
 }
 
-func (f *fanoutFixture) subscribe(id uint64, tenant, channel string) *Conn {
+func (f *fanoutFixture) subscribe(t *testing.T, id uint64, tenant, channel string) *Conn {
+	t.Helper()
 	conn := NewConn(id, ConnConfig{
 		TenantID: tenant, Subject: "u",
 		WriteBufBytes: 16 * 1024, ReadBufBytes: 1024,
 		PerViewerBps: 2048, Shards: f.shards,
 	})
 	if _, err := f.store.Subscribe(tenant, channel, conn); err != nil {
-		panic(err)
+		t.Fatalf("Subscribe %s/%s: %v", tenant, channel, err)
 	}
 	return conn
 }
@@ -142,7 +143,7 @@ func (f *fanoutFixture) gapsFor(id uint64) []protocol.GapNotice {
 // must receive it exactly once.
 func TestFanoutDeliversToASubscriberOnAnotherInstance(t *testing.T) {
 	f := newFanoutFixture(t)
-	subscriber := f.subscribe(1, "t1", "room:1")
+	subscriber := f.subscribe(t, 1, "t1", "room:1")
 
 	// A separate engine, playing the instance that accepted the publish.
 	publisher := newFanoutFixture(t)
@@ -188,7 +189,7 @@ func TestFanoutDiscardsUnservedChannel(t *testing.T) {
 func TestFanoutDeliversExactlyOncePerSubscriber(t *testing.T) {
 	f := newFanoutFixture(t)
 	for i := 0; i < 20; i++ {
-		f.subscribe(uint64(i+1), "t1", "room:1")
+		f.subscribe(t, uint64(i+1), "t1", "room:1")
 	}
 
 	if _, err := f.fanout.Dispatch(bus.Envelope{
@@ -213,8 +214,8 @@ func TestFanoutDeliversExactlyOncePerSubscriber(t *testing.T) {
 // Two tenants may use the same channel name without observing each other.
 func TestFanoutRespectsTenantIsolation(t *testing.T) {
 	f := newFanoutFixture(t)
-	a := f.subscribe(1, "t1", "shared")
-	b := f.subscribe(2, "t2", "shared")
+	a := f.subscribe(t, 1, "t1", "shared")
+	b := f.subscribe(t, 2, "t2", "shared")
 
 	if _, err := f.fanout.Dispatch(bus.Envelope{
 		TenantID: "t1", Channel: "shared", MessageID: 1, Body: []byte("for t1"),
@@ -235,7 +236,7 @@ func TestFanoutRespectsTenantIsolation(t *testing.T) {
 // state and nothing scheduled.
 func TestFanoutHonoursRequestedExpiry(t *testing.T) {
 	f := newFanoutFixture(t)
-	conn := f.subscribe(1, "t1", "room:1")
+	conn := f.subscribe(t, 1, "t1", "room:1")
 
 	nowMs := uint64(f.now.UnixMilli())
 	if _, err := f.fanout.Dispatch(bus.Envelope{
@@ -256,7 +257,7 @@ func TestFanoutHonoursRequestedExpiry(t *testing.T) {
 
 func TestFanoutCoalescesWithinWindow(t *testing.T) {
 	f := newFanoutFixture(t)
-	conn := f.subscribe(1, "t1", "room:1")
+	conn := f.subscribe(t, 1, "t1", "room:1")
 
 	// A merge ratio of 20 with a long window, so only the count closes it.
 	f.coalesce = NewCoalescerSet(1_000_000, 5, 1<<20)
@@ -288,7 +289,7 @@ func TestFanoutCoalescesWithinWindow(t *testing.T) {
 // Coalescing disabled must send each message on its own.
 func TestFanoutWithCoalescingDisabled(t *testing.T) {
 	f := newFanoutFixture(t)
-	conn := f.subscribe(1, "t1", "room:1")
+	conn := f.subscribe(t, 1, "t1", "room:1")
 	f.coalesce.SetCoalescing("t1", "room:1", false)
 
 	for i := uint64(1); i <= 3; i++ {
@@ -319,7 +320,7 @@ func TestFanoutSerializesOncePerMessage(t *testing.T) {
 	f := newFanoutFixture(t)
 	const subscribers = 500
 	for i := 0; i < subscribers; i++ {
-		f.subscribe(uint64(i+1), "t1", "room:1")
+		f.subscribe(t, uint64(i+1), "t1", "room:1")
 	}
 
 	if _, err := f.fanout.Dispatch(bus.Envelope{
@@ -358,7 +359,7 @@ func TestFanoutSerializesOncePerMessage(t *testing.T) {
 // which is the whole point of a per-connection bound rather than a shared queue.
 func TestFanoutIsolatesUndersizedSubscriber(t *testing.T) {
 	f := newFanoutFixture(t)
-	healthy := f.subscribe(1, "t1", "room:1")
+	healthy := f.subscribe(t, 1, "t1", "room:1")
 	// Coalescing off so the buffer bound, not batch size, decides what fits.
 	f.coalesce.SetCoalescing("t1", "room:1", false)
 
@@ -402,8 +403,8 @@ func TestFanoutIsolatesUndersizedSubscriber(t *testing.T) {
 // closed, must be skipped without disturbing the others.
 func TestFanoutSkipsNonAcceptingConnections(t *testing.T) {
 	f := newFanoutFixture(t)
-	healthy := f.subscribe(1, "t1", "room:1")
-	closing := f.subscribe(2, "t1", "room:1")
+	healthy := f.subscribe(t, 1, "t1", "room:1")
+	closing := f.subscribe(t, 2, "t1", "room:1")
 	closing.SetState(ConnClosed)
 
 	f.coalesce.SetCoalescing("t1", "room:1", false)
@@ -477,7 +478,7 @@ func TestGapNoticePrecedesSubsequentContent(t *testing.T) {
 
 func TestFanoutRunConsumesBus(t *testing.T) {
 	f := newFanoutFixture(t)
-	conn := f.subscribe(1, "t1", "room:1")
+	conn := f.subscribe(t, 1, "t1", "room:1")
 
 	b := bus.NewMemoryBus()
 	defer b.Close()
@@ -510,7 +511,7 @@ func TestFanoutRunConsumesBus(t *testing.T) {
 func TestFanoutStats(t *testing.T) {
 	f := newFanoutFixture(t)
 	for i := 0; i < 10; i++ {
-		f.subscribe(uint64(i+1), "t1", "room:1")
+		f.subscribe(t, uint64(i+1), "t1", "room:1")
 	}
 	// A high merge target, so the window closes on time rather than on count.
 	f.coalesce = NewCoalescerSet(1000, 1000, 1<<20)

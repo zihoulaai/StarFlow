@@ -33,12 +33,17 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 	return f
 }
 
-func (f *lifecycleFixture) track(id uint64, channels ...string) *Conn {
-	conn := NewConn(id, ConnConfig{TenantID: "t1", Subject: "u", WriteBufBytes: 1024, ReadBufBytes: 256, PerViewerBps: 2048, Shards: f.shards})
+func (f *lifecycleFixture) track(t *testing.T, id uint64, channels ...string) *Conn {
+	t.Helper()
+	conn := NewConn(id, ConnConfig{
+		TenantID: "t1", Subject: "u",
+		WriteBufBytes: 1024, ReadBufBytes: 256,
+		PerViewerBps: 2048, Shards: f.shards,
+	})
 	f.lc.Track(conn)
 	for _, c := range channels {
 		if _, err := f.store.Subscribe("t1", c, conn); err != nil {
-			panic(err)
+			t.Fatalf("Subscribe t1/%s: %v", c, err)
 		}
 	}
 	return conn
@@ -48,7 +53,7 @@ func (f *lifecycleFixture) track(id uint64, channels ...string) *Conn {
 // released, or it holds channel state forever.
 func TestLivenessClosesUnresponsiveConnection(t *testing.T) {
 	f := newLifecycleFixture(t)
-	conn := f.track(1, "room:1", "room:2")
+	conn := f.track(t, 1, "room:1", "room:2")
 
 	// No response at all.
 	f.now = f.now.Add(30 * time.Second)
@@ -84,7 +89,7 @@ func TestLivenessClosesUnresponsiveConnection(t *testing.T) {
 // reaped.
 func TestLivenessKeepsRespondingConnection(t *testing.T) {
 	f := newLifecycleFixture(t)
-	f.track(1, "room:1")
+	f.track(t, 1, "room:1")
 
 	for round := 0; round < 20; round++ {
 		f.now = f.now.Add(11 * time.Second)
@@ -102,7 +107,7 @@ func TestLivenessKeepsRespondingConnection(t *testing.T) {
 // reveals that, so the probe has to exist.
 func TestLivenessDetectsSilentlyDroppedConnection(t *testing.T) {
 	f := newLifecycleFixture(t)
-	conn := f.track(1, "room:1")
+	conn := f.track(t, 1, "room:1")
 
 	// The client vanished without telling us; the last we saw was now.
 	f.now = f.now.Add(11 * time.Second)
@@ -127,12 +132,12 @@ func TestLivenessCostIsIndependentOfTraffic(t *testing.T) {
 	const conns = 500
 	for i := 0; i < conns; i++ {
 		id := uint64(i + 1)
-		quiet.track(id, "room:1")
-		busy.track(id, "room:1")
+		quiet.track(t, id, "room:1")
+		busy.track(t, id, "room:1")
 	}
 
 	for i := 0; i < 1000; i++ {
-		if _, err := busy.lc.store.Subscribe("t1", "room:1", busy.track(uint64(conns+i+1))); err != nil {
+		if _, err := busy.lc.store.Subscribe("t1", "room:1", busy.track(t, uint64(conns+i+1))); err != nil {
 			t.Fatalf("Subscribe: %v", err)
 		}
 	}
@@ -167,7 +172,7 @@ func TestLivenessCostIsIndependentOfTraffic(t *testing.T) {
 // is already bounded, so there is no room left to give it.
 func TestSlowSubscriberIsReaped(t *testing.T) {
 	f := newLifecycleFixture(t)
-	conn := f.track(1, "room:1")
+	conn := f.track(t, 1, "room:1")
 
 	conn.Enqueue([]byte("backlog"), 1)
 	if got := len(f.lc.SlowConnections()); got != 1 {
@@ -195,7 +200,7 @@ func TestSlowSubscriberIsReaped(t *testing.T) {
 // A connection that keeps draining must never be classified as slow.
 func TestHealthyConnectionIsNotSlow(t *testing.T) {
 	f := newLifecycleFixture(t)
-	conn := f.track(1, "room:1")
+	conn := f.track(t, 1, "room:1")
 
 	for i := 0; i < 50; i++ {
 		conn.Enqueue([]byte("x"), 1)
@@ -211,7 +216,7 @@ func TestHealthyConnectionIsNotSlow(t *testing.T) {
 // to before they close, so they must not be reaped as slow.
 func TestDrainingConnectionsAreNotReapedAsSlow(t *testing.T) {
 	f := newLifecycleFixture(t)
-	conn := f.track(1, "room:1")
+	conn := f.track(t, 1, "room:1")
 	conn.Enqueue([]byte("backlog"), 1)
 
 	f.now = f.now.Add(500 * time.Millisecond)
@@ -228,8 +233,8 @@ func TestDrainingConnectionsAreNotReapedAsSlow(t *testing.T) {
 // reconnect is a full handshake.
 func TestDrainSequence(t *testing.T) {
 	f := newLifecycleFixture(t)
-	a := f.track(1, "room:1")
-	b := f.track(2, "room:1")
+	a := f.track(t, 1, "room:1")
+	b := f.track(t, 2, "room:1")
 
 	if !a.Accepting() {
 		t.Error("a connection is not accepting before drain")
@@ -282,7 +287,7 @@ func TestPingPongFrames(t *testing.T) {
 // connection.
 func TestCloseIsIdempotent(t *testing.T) {
 	f := newLifecycleFixture(t)
-	conn := f.track(1, "room:1", "room:2")
+	conn := f.track(t, 1, "room:1", "room:2")
 
 	var closes int
 	conn.SetCloseFunc(func() { closes++ })
@@ -309,7 +314,7 @@ func TestConcurrentLifecycleOperations(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < 200; i++ {
 				id := uint64(g*1000 + i)
-				conn := f.track(id, "room:1")
+				conn := f.track(t, id, "room:1")
 				f.lc.Ping(conn)
 				f.lc.SlowConnections()
 				if i%10 == 0 {
@@ -328,7 +333,7 @@ func TestConcurrentLifecycleOperations(t *testing.T) {
 // acknowledgement, or replay would otherwise pass every existing test.
 func TestQoS0Semantics(t *testing.T) {
 	f := newFanoutFixture(t)
-	conn := f.subscribe(1, "t1", "room:1")
+	conn := f.subscribe(t, 1, "t1", "room:1")
 	f.coalesce.SetCoalescing("t1", "room:1", false)
 
 	t.Run("delivered without acknowledgement", func(t *testing.T) {
@@ -363,7 +368,7 @@ func TestQoS0Semantics(t *testing.T) {
 
 		// Resubscribe as a fresh connection and confirm nothing arrives.
 		f.store.UnsubscribeAll(conn)
-		rejoined := f.subscribe(99, "t1", "room:1")
+		rejoined := f.subscribe(t, 99, "t1", "room:1")
 		f.flushAll()
 
 		if got := len(f.framesFor(rejoined.ID)); got != 0 {
@@ -374,7 +379,7 @@ func TestQoS0Semantics(t *testing.T) {
 	t.Run("duplicates and reordering are permitted, not prevented", func(t *testing.T) {
 		// A fresh connection: the previous subtest closed the original, and a
 		// closed connection is correctly skipped.
-		dup := f.subscribe(2, "t1", "room:1")
+		dup := f.subscribe(t, 2, "t1", "room:1")
 
 		// Dispatching the same message twice delivers it twice. QoS0 permits
 		// this, so the contract is that duplicates are allowed rather than that
@@ -426,7 +431,7 @@ func TestQoS0Semantics(t *testing.T) {
 // operator watching a client they believe they evicted still receiving data.
 func TestTerminateClosesConnectionAndReleasesSubscriptions(t *testing.T) {
 	f := newLifecycleFixture(t)
-	conn := f.track(1, "room:1", "room:2")
+	conn := f.track(t, 1, "room:1", "room:2")
 
 	if !f.lc.Terminate("t1", 1) {
 		t.Fatal("Terminate reported no such connection for a live one")
@@ -450,7 +455,7 @@ func TestTerminateClosesConnectionAndReleasesSubscriptions(t *testing.T) {
 // one tenant close another's connection by naming its id.
 func TestTerminateIsScopedToItsTenant(t *testing.T) {
 	f := newLifecycleFixture(t)
-	conn := f.track(7, "room:1")
+	conn := f.track(t, 7, "room:1")
 
 	if f.lc.Terminate("t2", 7) {
 		t.Error("Terminate closed a connection belonging to another tenant")
@@ -470,7 +475,7 @@ func TestTerminateIsScopedToItsTenant(t *testing.T) {
 // match any rather than matching none.
 func TestTerminateWithEmptyTenantMatchesAnyTenant(t *testing.T) {
 	f := newLifecycleFixture(t)
-	conn := f.track(3, "room:1")
+	conn := f.track(t, 3, "room:1")
 
 	if !f.lc.Terminate("", 3) {
 		t.Fatal("Terminate with an empty tenant did not match a live connection")

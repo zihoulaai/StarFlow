@@ -18,10 +18,6 @@ import (
 	"time"
 )
 
-// setGCPercent is a variable so tests can observe the call without mutating
-// process-wide GC state.
-var setGCPercent func(int) int = debug.SetGCPercent
-
 // DefaultMaxMessageBytes is the publish-side size limit when a tenant has not
 // configured one. 4 KB keeps a coalesced batch inside a single TCP segment
 // budget on the egress side.
@@ -345,7 +341,7 @@ func (c *Config) Validate() error {
 // the runtime has started.
 func (c *Config) ApplyRuntime() {
 	debug.SetMemoryLimit(c.Runtime.MemLimitBytes)
-	setGCPercent(c.Runtime.GOGC)
+	debug.SetGCPercent(c.Runtime.GOGC)
 	if c.Runtime.GOMAXPROCS > 0 {
 		runtime.GOMAXPROCS(c.Runtime.GOMAXPROCS)
 	}

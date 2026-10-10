@@ -27,13 +27,17 @@ type Alert struct {
 	At    time.Time
 }
 
-// AlertRule is the set of conditions the service evaluates.
+// alertRule is the set of conditions the service evaluates.
 //
 // Each one exists because a specific incident looks different from the others in
 // the numbers. A latency breach with normal drop rates is a capacity problem; the
 // same latency with a slow-subscriber spike is a client problem, and paging
 // someone to add capacity for the second would be the wrong response.
-var AlertRule = []AlertCondition{
+//
+// It is unexported because each condition carries a Breached closure: an
+// exported slice would let any importer invert or disable an alert for every
+// evaluator in the process.
+var alertRule = []AlertCondition{
 	{
 		Name:     "delivery_latency_breach",
 		Scope:    "instance",
@@ -157,7 +161,7 @@ func (e *Evaluator) Evaluate(s Snapshot) []Alert {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	for _, c := range AlertRule {
+	for _, c := range alertRule {
 		key := c.Name + "|" + c.Scope
 		if c.Breached(s) {
 			if _, already := e.fired[key]; already {

@@ -620,7 +620,7 @@ func TestDocumentedAlertsExist(t *testing.T) {
 	doc := string(raw)
 
 	emitted := map[string]bool{}
-	for _, c := range AlertRule {
+	for _, c := range alertRule {
 		emitted[c.Name] = true
 	}
 	// The trace-level alerts are documented separately from the snapshot rules.
@@ -653,7 +653,7 @@ func TestDocumentedLatencyBudgetMatchesTheAlert(t *testing.T) {
 	}
 	// And the alert must breach at exactly that budget, not at some other
 	// figure nobody wrote down.
-	cond := AlertRule[0]
+	cond := alertRule[0]
 	if cond.Breached(Snapshot{PublishesAccepted: 1, LatencyP99Ms: LatencyBudgetP99Ms}) {
 		t.Errorf("the latency alert fires exactly at the %.0fms budget", LatencyBudgetP99Ms)
 	}
