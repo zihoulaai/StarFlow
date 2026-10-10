@@ -84,30 +84,36 @@ type Action struct {
 	At     time.Time
 }
 
-// Store is the administrative data access the handlers need.
+// TenantStore is the administrative data access the tenant handlers need.
 //
-// It is an interface rather than the control-plane Store directly so the
-// surface can be tested without a database, and so the administrative shape can
-// change without the persistence layer following it.
-type Store interface {
-	// Tenants
+// Each aggregate gets its own interface rather than one Store covering all of
+// them, so a consumer that only manages quotas is not handed thirteen methods to
+// implement and the boundaries between aggregates stay visible. The adapters
+// satisfy all four, and a caller may supply them separately.
+type TenantStore interface {
 	ListTenants(ctx context.Context) ([]TenantView, error)
 	GetTenant(ctx context.Context, id string) (TenantView, error)
 	CreateTenant(ctx context.Context, name string) (TenantView, error)
 	UpdateTenant(ctx context.Context, id, name string) (TenantView, error)
+}
 
-	// Applications
+// ApplicationStore is the administrative data access for credentials.
+type ApplicationStore interface {
 	ListApplications(ctx context.Context, tenantID string) ([]AppView, error)
 	GetApplication(ctx context.Context, tenantID, id string) (AppView, error)
 	CreateApplication(ctx context.Context, tenantID, name string, canPublish, canSubscribe bool) (AppView, string, error)
 	SetApplicationEnabled(ctx context.Context, tenantID, id string, enabled bool) (AppView, error)
 	RotateSecret(ctx context.Context, tenantID, id string) (AppView, string, error)
+}
 
-	// Quotas
+// QuotaStore is the administrative data access for a tenant's ceilings.
+type QuotaStore interface {
 	GetQuota(ctx context.Context, tenantID string) (QuotaView, error)
 	SetQuota(ctx context.Context, tenantID string, q QuotaView) (QuotaView, error)
+}
 
-	// Channels
+// ChannelStore is the administrative data access for channel limits.
+type ChannelStore interface {
 	GetChannel(ctx context.Context, tenantID, channel string) (ChannelView, error)
 	SetChannelLimit(ctx context.Context, tenantID, channel string, maxSubscribers int, ceiling float64, hasCeiling bool) (ChannelView, error)
 }
@@ -179,21 +185,53 @@ type Degradation interface {
 
 // Server serves the administrative surface.
 type Server struct {
-	store   Store
-	auth    Authorizer
-	audit   Auditor
-	conns   Connections
-	degrade Degradation
-	now     func() time.Time
-	mux     *http.ServeMux
+	tenants      TenantStore
+	applications ApplicationStore
+	quotas       QuotaStore
+	channels     ChannelStore
+	auth         Authorizer
+	audit        Auditor
+	conns        Connections
+	degrade      Degradation
+	now          func() time.Time
+	mux          *http.ServeMux
+}
+
+// ServerConfig holds the collaborators a Server needs.
+//
+// It is a struct rather than a parameter list because the fields are mostly
+// interfaces of similar shape: positionally, a caller cannot tell which is
+// which, and adding a dependency means changing every call site. Now is injected
+// so administrative timestamps are testable; nil means time.Now.
+type ServerConfig struct {
+	Tenants      TenantStore
+	Applications ApplicationStore
+	Quotas       QuotaStore
+	Channels     ChannelStore
+	Authorizer   Authorizer
+	Auditor      Auditor
+	Connections  Connections
+	Degradation  Degradation
+	Now          func() time.Time
 }
 
 // New returns a server.
-func New(store Store, auth Authorizer, audit Auditor, conns Connections, degrade Degradation, now func() time.Time) *Server {
+func New(cfg ServerConfig) *Server {
+	now := cfg.Now
 	if now == nil {
 		now = time.Now
 	}
-	s := &Server{store: store, auth: auth, audit: audit, conns: conns, degrade: degrade, now: now}
+	s := &Server{
+		tenants:      cfg.Tenants,
+		applications: cfg.Applications,
+		quotas:       cfg.Quotas,
+		channels:     cfg.Channels,
+		auth:         cfg.Authorizer,
+		audit:        cfg.Auditor,
+		conns:        cfg.Connections,
+		degrade:      cfg.Degradation,
+		now:          now,
+	}
 	s.routes()
 	return s
 }
@@ -270,7 +308,7 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		tenants, err := s.store.ListTenants(ctx)
+		tenants, err := s.tenants.ListTenants(ctx)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not list tenants")
 			return
@@ -288,7 +326,7 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "name is required")
 			return
 		}
-		tenant, err := s.store.CreateTenant(ctx, body.Name)
+		tenant, err := s.tenants.CreateTenant(ctx, body.Name)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create tenant")
 			return
@@ -310,7 +348,7 @@ func (s *Server) handleTenantByID(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		tenant, err := s.store.GetTenant(ctx, id)
+		tenant, err := s.tenants.GetTenant(ctx, id)
 		if err != nil {
 			writeLookupError(w, err, "tenant")
 			return
@@ -328,7 +366,7 @@ func (s *Server) handleTenantByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid body")
 			return
 		}
-		tenant, err := s.store.UpdateTenant(ctx, id, body.Name)
+		tenant, err := s.tenants.UpdateTenant(ctx, id, body.Name)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not update tenant")
 			return
@@ -350,7 +388,7 @@ func (s *Server) handleApplications(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		apps, err := s.store.ListApplications(ctx, tenantID)
+		apps, err := s.applications.ListApplications(ctx, tenantID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not list applications")
 			return
@@ -370,7 +408,7 @@ func (s *Server) handleApplications(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "name is required")
 			return
 		}
-		app, secret, err := s.store.CreateApplication(ctx, tenantID, body.Name, body.CanPublish, body.CanSubscribe)
+		app, secret, err := s.applications.CreateApplication(ctx, tenantID, body.Name, body.CanPublish, body.CanSubscribe)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not create application")
 			return
@@ -403,7 +441,7 @@ func (s *Server) handleApplicationByID(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		app, err := s.store.GetApplication(ctx, tenantID, id)
+		app, err := s.applications.GetApplication(ctx, tenantID, id)
 		if err != nil {
 			writeLookupError(w, err, "application")
 			return
@@ -421,7 +459,7 @@ func (s *Server) handleApplicationByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "enabled is required")
 			return
 		}
-		app, err := s.store.SetApplicationEnabled(ctx, tenantID, id, *body.Enabled)
+		app, err := s.applications.SetApplicationEnabled(ctx, tenantID, id, *body.Enabled)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not update application")
 			return
@@ -444,7 +482,7 @@ func (s *Server) handleApplicationByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		{
-			app, secret, err := s.store.RotateSecret(ctx, tenantID, id)
+			app, secret, err := s.applications.RotateSecret(ctx, tenantID, id)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "could not rotate secret")
 				return
@@ -470,7 +508,7 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		q, err := s.store.GetQuota(ctx, tenantID)
+		q, err := s.quotas.GetQuota(ctx, tenantID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not read quota")
 			return
@@ -490,7 +528,7 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 		// recorded, because existing connections are not ended by it. An
 		// operator reducing a limit should be able to see that it took effect
 		// without being surprised that nobody was disconnected.
-		updated, err := s.store.SetQuota(ctx, tenantID, q)
+		updated, err := s.quotas.SetQuota(ctx, tenantID, q)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not write quota")
 			return
@@ -519,7 +557,7 @@ func (s *Server) handleChannel(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		view, err := s.store.GetChannel(ctx, tenantID, channel)
+		view, err := s.channels.GetChannel(ctx, tenantID, channel)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not read channel")
 			return
@@ -547,7 +585,7 @@ func (s *Server) handleChannel(w http.ResponseWriter, r *http.Request) {
 		if hasCeiling {
 			ceiling = *body.PublishCeiling
 		}
-		view, err := s.store.SetChannelLimit(ctx, tenantID, channel, maxSubs, ceiling, hasCeiling)
+		view, err := s.channels.SetChannelLimit(ctx, tenantID, channel, maxSubs, ceiling, hasCeiling)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not write channel limits")
 			return

@@ -8,6 +8,16 @@ import (
 	"github.com/starflow/push/internal/controlplane"
 )
 
+// One adapter satisfies all four aggregate interfaces. These fail to compile if
+// a method moves, so the split cannot silently leave the adapter implementing
+// only part of the surface.
+var (
+	_ admin.TenantStore      = (*Store)(nil)
+	_ admin.ApplicationStore = (*Store)(nil)
+	_ admin.QuotaStore       = (*Store)(nil)
+	_ admin.ChannelStore     = (*Store)(nil)
+)
+
 // The admin handler decides 404 against 500 by branching on this sentinel, so a
 // translated miss has to be matchable from outside this package. Translating
 // onto a private value would force the handler to compare error text instead.

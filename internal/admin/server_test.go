@@ -32,6 +32,25 @@ type fakeStore struct {
 	rotations map[string]int
 }
 
+// The four aggregates are separate interfaces, and a double serving all of them
+// is one type per aggregate rather than one for the whole surface: the point of
+// the split is that each is separately substitutable.
+type (
+	fakeTenants      = fakeStore
+	fakeApplications = fakeStore
+	fakeQuotas       = fakeStore
+	fakeChannels     = fakeStore
+)
+
+// Each aggregate is satisfied by the one shared fake, and the assertions below
+// fail to compile if a method moves between interfaces.
+var (
+	_ TenantStore      = (*fakeTenants)(nil)
+	_ ApplicationStore = (*fakeApplications)(nil)
+	_ QuotaStore       = (*fakeQuotas)(nil)
+	_ ChannelStore     = (*fakeChannels)(nil)
+)
+
 func newFakeStore() *fakeStore {
 	return &fakeStore{
 		tenants:   map[string]TenantView{},
@@ -277,7 +296,17 @@ func newAdminFixture(t *testing.T) *adminFixture {
 	degrade := &fakeDegrade{}
 
 	return &adminFixture{
-		server:  New(store, auth, audit, conns, degrade, func() time.Time { return time.UnixMilli(1_700_000_000_000) }),
+		server: New(ServerConfig{
+			Tenants:      store,
+			Applications: store,
+			Quotas:       store,
+			Channels:     store,
+			Authorizer:   auth,
+			Auditor:      audit,
+			Connections:  conns,
+			Degradation:  degrade,
+			Now:          func() time.Time { return time.UnixMilli(1_700_000_000_000) },
+		}),
 		store:   store,
 		audit:   audit,
 		auth:    auth,
@@ -679,8 +708,18 @@ func TestDocumentedEndpointsAreRouted(t *testing.T) {
 		req.Header.Set("X-Admin-Subject", "admin@example.com")
 		rec := httptest.NewRecorder()
 
-		New(newFakeStore(), &fakeAuthorizer{roles: map[string]Role{}},
-			&fakeAuditor{}, &fakeConns{}, &fakeDegrade{}, time.Now).ServeHTTP(rec, req)
+		s := New(ServerConfig{
+			Tenants:      newFakeStore(),
+			Applications: newFakeStore(),
+			Quotas:       newFakeStore(),
+			Channels:     newFakeStore(),
+			Authorizer:   &fakeAuthorizer{roles: map[string]Role{}},
+			Auditor:      &fakeAuditor{},
+			Connections:  &fakeConns{},
+			Degradation:  &fakeDegrade{},
+			Now:          time.Now,
+		})
+		s.ServeHTTP(rec, req)
 
 		// 404 from the mux means the path is not routed at all. Anything else,
 		// including 401 and 400, means the route exists and handled it.

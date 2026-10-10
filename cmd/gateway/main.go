@@ -256,20 +256,24 @@ func build(ctx context.Context, cfg *config.Config, material []byte) (*applicati
 	dataMux.Handle("/publish", pubHandler)
 	dataMux.Handle("/", transport.Handler())
 
-	adminServer := admin.New(
-		adminadapters.NewStore(cpStore, gStore, func(tenantID string) {
-			// Reloading here is what makes an administrative change take effect on
-			// this instance immediately instead of at the next restart.
-			if err := cache.Reload(ctx, tenantID); err != nil {
-				fmt.Fprintf(os.Stderr, "gateway: reload tenant %s after admin write: %v\n", tenantID, err)
-			}
-		}),
-		&adminadapters.Authorizer{CP: cpStore},
-		auditor,
-		&adminadapters.Connections{Store: gStore, Close: lifecycle.Terminate},
-		&adminadapters.Degradation{Ladder: ladder},
-		time.Now,
-	)
+	adminStore := adminadapters.NewStore(cpStore, gStore, func(tenantID string) {
+		// Reloading here is what makes an administrative change take effect on
+		// this instance immediately instead of at the next restart.
+		if err := cache.Reload(ctx, tenantID); err != nil {
+			fmt.Fprintf(os.Stderr, "gateway: reload tenant %s after admin write: %v\n", tenantID, err)
+		}
+	})
+	adminServer := admin.New(admin.ServerConfig{
+		Tenants:      adminStore,
+		Applications: adminStore,
+		Quotas:       adminStore,
+		Channels:     adminStore,
+		Authorizer:   &adminadapters.Authorizer{CP: cpStore},
+		Auditor:      auditor,
+		Connections:  &adminadapters.Connections{Store: gStore, Close: lifecycle.Terminate},
+		Degradation:  &adminadapters.Degradation{Ladder: ladder},
+		Now:          time.Now,
+	})
 
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/admin/", adminServer)
