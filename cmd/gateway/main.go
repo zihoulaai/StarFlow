@@ -265,7 +265,7 @@ func build(ctx context.Context, cfg *config.Config, material []byte) (*applicati
 		}),
 		&adminadapters.Authorizer{CP: cpStore},
 		auditor,
-		&adminadapters.Connections{Store: gStore},
+		&adminadapters.Connections{Store: gStore, Close: lifecycle.Terminate},
 		&adminadapters.Degradation{Ladder: ladder},
 		time.Now,
 	)

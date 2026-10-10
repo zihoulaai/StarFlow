@@ -419,3 +419,63 @@ func TestQoS0Semantics(t *testing.T) {
 		}
 	})
 }
+
+// An administrator terminating a connection must actually close it and release
+// what it held. The admin surface claims this when it reports success, so a
+// terminate that returns true while the connection lives would leave the
+// operator watching a client they believe they evicted still receiving data.
+func TestTerminateClosesConnectionAndReleasesSubscriptions(t *testing.T) {
+	f := newLifecycleFixture(t)
+	conn := f.track(1, "room:1", "room:2")
+
+	if !f.lc.Terminate("t1", 1) {
+		t.Fatal("Terminate reported no such connection for a live one")
+	}
+	if got := conn.State(); got != ConnClosed {
+		t.Errorf("state = %v, want closed", got)
+	}
+	if got := f.store.SubscriberCount(); got != 0 {
+		t.Errorf("subscriber count = %d after termination, want 0; the connection still holds channel state", got)
+	}
+	if conns := f.store.Connections(); len(conns) != 0 {
+		t.Errorf("Connections returned %d entries after termination, want 0", len(conns))
+	}
+	if f.lc.Terminate("t1", 1) {
+		t.Error("a second Terminate reported success; the first should have removed it")
+	}
+}
+
+// The tenant comes from the request path, so scoping has to happen in the
+// lookup itself. Filtering only the listing would let an administrator granted
+// one tenant close another's connection by naming its id.
+func TestTerminateIsScopedToItsTenant(t *testing.T) {
+	f := newLifecycleFixture(t)
+	conn := f.track(7, "room:1")
+
+	if f.lc.Terminate("t2", 7) {
+		t.Error("Terminate closed a connection belonging to another tenant")
+	}
+	if got := conn.State(); got != ConnOpen {
+		t.Errorf("state = %v after a cross-tenant terminate, want open", got)
+	}
+	if got := f.store.SubscriberCount(); got != 1 {
+		t.Errorf("subscriber count = %d after a cross-tenant terminate, want 1", got)
+	}
+	if !f.lc.Terminate("t1", 7) {
+		t.Error("Terminate did not close the connection for its own tenant")
+	}
+}
+
+// The instance-wide view has no tenant in the path, so an empty tenant has to
+// match any rather than matching none.
+func TestTerminateWithEmptyTenantMatchesAnyTenant(t *testing.T) {
+	f := newLifecycleFixture(t)
+	conn := f.track(3, "room:1")
+
+	if !f.lc.Terminate("", 3) {
+		t.Fatal("Terminate with an empty tenant did not match a live connection")
+	}
+	if got := conn.State(); got != ConnClosed {
+		t.Errorf("state = %v, want closed", got)
+	}
+}

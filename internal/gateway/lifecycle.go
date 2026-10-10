@@ -186,6 +186,30 @@ func (l *Lifecycle) Close(conn *Conn) {
 	l.closed.Add(1)
 }
 
+// Terminate closes the connection with the given id, and reports whether one
+// was found.
+//
+// The tenant is part of the lookup because the identifier arrives from an
+// administrative request path: an administrator scoped to one tenant must not be
+// able to close another's connection by guessing an id. An empty tenant matches
+// any, which is what the instance-wide view wants.
+//
+// Termination is not a ban. The client may reconnect immediately and is then
+// subject to the same authentication and rate checks as any new client.
+func (l *Lifecycle) Terminate(tenantID string, id uint64) bool {
+	for _, conn := range l.store.Connections() {
+		if conn.ID != id {
+			continue
+		}
+		if tenantID != "" && conn.TenantID != tenantID {
+			continue
+		}
+		l.Close(conn)
+		return true
+	}
+	return false
+}
+
 // SlowConnections returns the connections that have held queued content longer
 // than the tolerance.
 func (l *Lifecycle) SlowConnections() []*Conn {

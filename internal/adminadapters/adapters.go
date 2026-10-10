@@ -321,8 +321,9 @@ func (a *Auditor) Failures() int {
 // Connections adapts the data plane's live connections to admin.Connections.
 type Connections struct {
 	Store *gateway.Store
-	// Close terminates a connection by id, wired to the transport.
-	Close func(id uint64) bool
+	// Close terminates a connection by id, scoped to a tenant. It is wired to
+	// the transport; a nil Close means no connection can be terminated.
+	Close func(tenantID string, id uint64) bool
 }
 
 // List returns the instance's live connections, optionally narrowed to a tenant.
@@ -363,11 +364,16 @@ func (c *Connections) view(conn *gateway.Conn) admin.ConnectionView {
 	}
 }
 
+// Terminate closes a connection and reports whether it was found.
+//
+// The tenant is passed through to the lookup rather than only being used to
+// filter the listing: an administrator granted one tenant must not be able to
+// close another's connection by naming its id.
 func (c *Connections) Terminate(tenantID string, id uint64) bool {
 	if c.Close == nil {
 		return false
 	}
-	return c.Close(id)
+	return c.Close(tenantID, id)
 }
 
 // Degradation adapts the ladder to admin.Degradation.
