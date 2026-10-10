@@ -42,7 +42,11 @@ func (f *fanoutFixture) write(conn *Conn, out []byte) {
 }
 
 func (f *fanoutFixture) subscribe(id uint64, tenant, channel string) *Conn {
-	conn := NewConn(id, tenant, "u", 16*1024, 1024, 2048, f.shards)
+	conn := NewConn(id, ConnConfig{
+		TenantID: tenant, Subject: "u",
+		WriteBufBytes: 16 * 1024, ReadBufBytes: 1024,
+		PerViewerBps: 2048, Shards: f.shards,
+	})
 	if _, err := f.store.Subscribe(tenant, channel, conn); err != nil {
 		panic(err)
 	}
@@ -360,7 +364,7 @@ func TestFanoutIsolatesUndersizedSubscriber(t *testing.T) {
 
 	// A buffer smaller than a single frame, so every enqueue is refused for this
 	// connection and only for this connection.
-	stunted := NewConn(2, "t1", "u", 64, 1024, 2048, f.shards)
+	stunted := NewConn(2, ConnConfig{TenantID: "t1", Subject: "u", WriteBufBytes: 64, ReadBufBytes: 1024, PerViewerBps: 2048, Shards: f.shards})
 	if _, err := f.store.Subscribe("t1", "room:1", stunted); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -421,7 +425,7 @@ func TestFanoutSkipsNonAcceptingConnections(t *testing.T) {
 // The gap notice must precede the content that follows a drop.
 func TestGapNoticePrecedesSubsequentContent(t *testing.T) {
 	f := newFanoutFixture(t)
-	conn := NewConn(1, "t1", "u", 512, 1024, 2048, f.shards)
+	conn := NewConn(1, ConnConfig{TenantID: "t1", Subject: "u", WriteBufBytes: 512, ReadBufBytes: 1024, PerViewerBps: 2048, Shards: f.shards})
 	if _, err := f.store.Subscribe("t1", "room:1", conn); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}

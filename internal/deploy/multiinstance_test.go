@@ -46,7 +46,7 @@ func newMultiInstance(t *testing.T, instances int, connsPerInstance int) *multiI
 
 		for c := 0; c < connsPerInstance; c++ {
 			id := uint64(i*10000 + c + 1)
-			conn := gateway.NewConn(id, "t1", "u", 16*1024, 1024, 2048, shards)
+			conn := gateway.NewConn(id, gateway.ConnConfig{TenantID: "t1", Subject: "u", WriteBufBytes: 16 * 1024, ReadBufBytes: 1024, PerViewerBps: 2048, Shards: shards})
 			lc.Track(conn)
 			if _, err := store.Subscribe("t1", "room:1", conn); err != nil {
 				t.Fatalf("Subscribe: %v", err)
@@ -262,7 +262,7 @@ func TestMultiInstanceIgnoresChannelsNoneServe(t *testing.T) {
 func TestMultiInstanceKeepsTenantsIsolated(t *testing.T) {
 	m := newMultiInstance(t, 2, 10)
 	// Add a second tenant's subscriber on instance zero only.
-	conn := gateway.NewConn(999, "t2", "u", 16*1024, 1024, 2048, gateway.NewShardSet(8))
+	conn := gateway.NewConn(999, gateway.ConnConfig{TenantID: "t2", Subject: "u", WriteBufBytes: 16 * 1024, ReadBufBytes: 1024, PerViewerBps: 2048, Shards: gateway.NewShardSet(8)})
 	if _, err := m.stores[0].Subscribe("t2", "room:1", conn); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestInstanceJoinsWithoutCoordination(t *testing.T) {
 	fanout := gateway.NewFanout(store, shards, coalesce, func() time.Time { return now })
 
 	for c := 0; c < 10; c++ {
-		conn := gateway.NewConn(uint64(90000+c), "t1", "u", 16*1024, 1024, 2048, shards)
+		conn := gateway.NewConn(uint64(90000+c), gateway.ConnConfig{TenantID: "t1", Subject: "u", WriteBufBytes: 16 * 1024, ReadBufBytes: 1024, PerViewerBps: 2048, Shards: shards})
 		if _, err := store.Subscribe("t1", "room:1", conn); err != nil {
 			t.Fatalf("Subscribe: %v", err)
 		}

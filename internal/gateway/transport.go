@@ -237,9 +237,14 @@ func (t *Transport) hello(r *http.Request, ws *websocket.Conn) (*Conn, error) {
 	seq := t.connSeq
 	t.mu.Unlock()
 
-	conn := NewConn(seq, id.TenantID, id.Subject,
-		t.cfg.WriteBufferBytes, t.cfg.ReadBufferBytes,
-		t.cfg.PerViewerBytesPerSecond, t.cfg.Shards)
+	conn := NewConn(seq, ConnConfig{
+		TenantID:      id.TenantID,
+		Subject:       id.Subject,
+		WriteBufBytes: t.cfg.WriteBufferBytes,
+		ReadBufBytes:  t.cfg.ReadBufferBytes,
+		PerViewerBps:  t.cfg.PerViewerBytesPerSecond,
+		Shards:        t.cfg.Shards,
+	})
 
 	t.mu.Lock()
 	t.sock[conn] = &socket{ws: ws}

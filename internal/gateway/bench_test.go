@@ -140,7 +140,7 @@ func BenchmarkFanoutNoAllocation(b *testing.B) {
 // BenchmarkEnqueueAllocation proves the fanout inner loop is allocation-free.
 func BenchmarkEnqueueAllocation(b *testing.B) {
 	shards := NewShardSet(1024)
-	c := NewConn(1, "t1", "s", 16*1024, 1024, 2048, shards)
+	c := NewConn(1, ConnConfig{TenantID: "t1", Subject: "s", WriteBufBytes: 16 * 1024, ReadBufBytes: 1024, PerViewerBps: 2048, Shards: shards})
 	frame := make([]byte, 512)
 
 	b.ReportAllocs()
@@ -163,10 +163,10 @@ func BenchmarkFlushScalesWithTraffic(b *testing.B) {
 			shards := NewShardSet(1024)
 			idle := make([]*Conn, idleConns)
 			for i := range idle {
-				idle[i] = NewConn(uint64(i+1), "t1", "s", 4096, 256, 2048, shards)
+				idle[i] = NewConn(uint64(i+1), ConnConfig{TenantID: "t1", Subject: "s", WriteBufBytes: 4096, ReadBufBytes: 256, PerViewerBps: 2048, Shards: shards})
 			}
 			// One connection with traffic.
-			busy := NewConn(uint64(idleConns+1), "t1", "s", 16*1024, 256, 2048, shards)
+			busy := NewConn(uint64(idleConns+1), ConnConfig{TenantID: "t1", Subject: "s", WriteBufBytes: 16 * 1024, ReadBufBytes: 256, PerViewerBps: 2048, Shards: shards})
 			busy.Enqueue(make([]byte, 256), 1)
 
 			scratch := make([]*Conn, 0, 256)
@@ -312,9 +312,9 @@ func TestFlushCostIgnoresIdleConnections(t *testing.T) {
 	measure := func(idleConns int) time.Duration {
 		shards := NewShardSet(1024)
 		for i := 0; i < idleConns; i++ {
-			NewConn(uint64(i+1), "t1", "s", 4096, 256, 2048, shards)
+			NewConn(uint64(i+1), ConnConfig{TenantID: "t1", Subject: "s", WriteBufBytes: 4096, ReadBufBytes: 256, PerViewerBps: 2048, Shards: shards})
 		}
-		busy := NewConn(uint64(idleConns+1), "t1", "s", 16*1024, 256, 2048, shards)
+		busy := NewConn(uint64(idleConns+1), ConnConfig{TenantID: "t1", Subject: "s", WriteBufBytes: 16 * 1024, ReadBufBytes: 256, PerViewerBps: 2048, Shards: shards})
 		busy.Enqueue(make([]byte, 256), 1)
 
 		scratch := make([]*Conn, 0, 64)
@@ -402,7 +402,7 @@ func BenchmarkFanoutHarness(b *testing.B) {
 			fanout := NewFanout(store, shards, coalesce, func() time.Time { return now })
 
 			for i := 0; i < cfg.connections; i++ {
-				conn := NewConn(uint64(i+1), "t1", "u", 16*1024, 1024, 2048, shards)
+				conn := NewConn(uint64(i+1), ConnConfig{TenantID: "t1", Subject: "u", WriteBufBytes: 16 * 1024, ReadBufBytes: 1024, PerViewerBps: 2048, Shards: shards})
 				if _, err := store.Subscribe("t1", "room:1", conn); err != nil {
 					b.Fatalf("Subscribe: %v", err)
 				}
@@ -494,7 +494,7 @@ func BenchmarkLadderSpan(b *testing.B) {
 		now := time.UnixMilli(1_700_000_000_000)
 		fanout := NewFanout(store, shards, nil, func() time.Time { return now })
 		for i := 0; i < conns; i++ {
-			conn := NewConn(uint64(i+1), "t1", "u", 16*1024, 1024, 2048, shards)
+			conn := NewConn(uint64(i+1), ConnConfig{TenantID: "t1", Subject: "u", WriteBufBytes: 16 * 1024, ReadBufBytes: 1024, PerViewerBps: 2048, Shards: shards})
 			if _, err := store.Subscribe("t1", "room:1", conn); err != nil {
 				b.Fatalf("Subscribe: %v", err)
 			}

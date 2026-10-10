@@ -34,7 +34,7 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 }
 
 func (f *lifecycleFixture) track(id uint64, channels ...string) *Conn {
-	conn := NewConn(id, "t1", "u", 1024, 256, 2048, f.shards)
+	conn := NewConn(id, ConnConfig{TenantID: "t1", Subject: "u", WriteBufBytes: 1024, ReadBufBytes: 256, PerViewerBps: 2048, Shards: f.shards})
 	f.lc.Track(conn)
 	for _, c := range channels {
 		if _, err := f.store.Subscribe("t1", c, conn); err != nil {

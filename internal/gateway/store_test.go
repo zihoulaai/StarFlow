@@ -12,7 +12,11 @@ import (
 )
 
 func newTestConn(id uint64, tenant string) *Conn {
-	return NewConn(id, tenant, "subject", 16*1024, 1024, 2048, NewShardSet(64))
+	return NewConn(id, ConnConfig{
+		TenantID: tenant, Subject: "subject",
+		WriteBufBytes: 16 * 1024, ReadBufBytes: 1024,
+		PerViewerBps: 2048, Shards: NewShardSet(64),
+	})
 }
 
 func TestStoreSubscribeAndLookup(t *testing.T) {
@@ -870,7 +874,7 @@ func TestEgressMeterZeroBudgetIsUnlimited(t *testing.T) {
 
 func TestConnEnqueueRegistersDirtyOnce(t *testing.T) {
 	shards := NewShardSet(64)
-	c := NewConn(7, "t1", "s", 4096, 256, 2048, shards)
+	c := NewConn(7, ConnConfig{TenantID: "t1", Subject: "s", WriteBufBytes: 4096, ReadBufBytes: 256, PerViewerBps: 2048, Shards: shards})
 
 	for i := 0; i < 50; i++ {
 		c.Enqueue([]byte("frame"), 1000)
@@ -905,7 +909,7 @@ func TestConnEnqueueRegistersDirtyOnce(t *testing.T) {
 }
 
 func TestConnQueuedSince(t *testing.T) {
-	c := NewConn(1, "t1", "s", 1024, 256, 2048, NewShardSet(8))
+	c := NewConn(1, ConnConfig{TenantID: "t1", Subject: "s", WriteBufBytes: 1024, ReadBufBytes: 256, PerViewerBps: 2048, Shards: NewShardSet(8)})
 	if _, queued := c.QueuedSince(2000); queued {
 		t.Error("a connection with nothing queued reported as queued")
 	}
@@ -919,7 +923,7 @@ func TestConnQueuedSince(t *testing.T) {
 
 // Drain reuses the caller's buffer, so a flush loop must not allocate per pass.
 func TestConnDrainReusesCallerBuffer(t *testing.T) {
-	c := NewConn(1, "t1", "s", 1024, 256, 2048, NewShardSet(8))
+	c := NewConn(1, ConnConfig{TenantID: "t1", Subject: "s", WriteBufBytes: 1024, ReadBufBytes: 256, PerViewerBps: 2048, Shards: NewShardSet(8)})
 	c.Enqueue([]byte("abcdefghij"), 1000)
 
 	buf := make([]byte, 0, 256)
@@ -940,7 +944,7 @@ func TestConnDrainReusesCallerBuffer(t *testing.T) {
 }
 
 func TestConnStateTransitions(t *testing.T) {
-	c := NewConn(1, "t1", "s", 1024, 256, 2048, NewShardSet(8))
+	c := NewConn(1, ConnConfig{TenantID: "t1", Subject: "s", WriteBufBytes: 1024, ReadBufBytes: 256, PerViewerBps: 2048, Shards: NewShardSet(8)})
 	if !c.Accepting() {
 		t.Error("a new connection is not accepting")
 	}
@@ -955,7 +959,7 @@ func TestConnStateTransitions(t *testing.T) {
 }
 
 func TestConnCloseIsIdempotent(t *testing.T) {
-	c := NewConn(1, "t1", "s", 1024, 256, 2048, NewShardSet(8))
+	c := NewConn(1, ConnConfig{TenantID: "t1", Subject: "s", WriteBufBytes: 1024, ReadBufBytes: 256, PerViewerBps: 2048, Shards: NewShardSet(8)})
 	closes := 0
 	c.SetCloseFunc(func() { closes++ })
 

@@ -461,7 +461,7 @@ func TestWriteBridgeDeliversABatch(t *testing.T) {
 // count a connection that holds several channels.
 func TestConnectionsDeduplicatesAcrossChannels(t *testing.T) {
 	store := NewStore()
-	conn := NewConn(1, "t1", "u1", 4096, 1024, 2048, NewShardSet(4))
+	conn := NewConn(1, ConnConfig{TenantID: "t1", Subject: "u1", WriteBufBytes: 4096, ReadBufBytes: 1024, PerViewerBps: 2048, Shards: NewShardSet(4)})
 	for _, ch := range []string{"a", "b", "c"} {
 		if _, err := store.Subscribe("t1", ch, conn); err != nil {
 			t.Fatalf("subscribe %s: %v", ch, err)

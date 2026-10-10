@@ -230,16 +230,36 @@ type Conn struct {
 	closeOnce sync.Once
 }
 
+// ConnConfig holds the per-connection settings the delivery path supplies.
+//
+// It is a struct rather than parameters because writeBuf, readBuf and
+// perViewerBps are three adjacent ints: a caller cannot check positionally which
+// buffer size is which, and transposing the first two compiles and runs while
+// giving every connection the wrong write budget.
+type ConnConfig struct {
+	// TenantID and Subject scope this connection's subscriptions.
+	TenantID string
+	Subject  string
+	// WriteBufBytes is the per-connection outbound queue budget.
+	WriteBufBytes int
+	// ReadBufBytes is the size of the connection's read buffer.
+	ReadBufBytes int
+	// PerViewerBps is this subscriber's egress budget in bytes per second.
+	PerViewerBps int
+	// Shards is the dirty-list registry the connection registers with.
+	Shards *ShardSet
+}
+
 // NewConn returns a connection with buffers sized from the delivery config.
-func NewConn(id uint64, tenantID, subject string, writeBuf, readBuf, perViewerBps int, shards *ShardSet) *Conn {
+func NewConn(id uint64, cfg ConnConfig) *Conn {
 	return &Conn{
 		ID:       id,
-		TenantID: tenantID,
-		Subject:  subject,
-		buf:      NewConnBuffer(writeBuf),
-		readBuf:  make([]byte, readBuf),
-		eg:       NewEgressMeter(perViewerBps),
-		shards:   shards,
+		TenantID: cfg.TenantID,
+		Subject:  cfg.Subject,
+		buf:      NewConnBuffer(cfg.WriteBufBytes),
+		readBuf:  make([]byte, cfg.ReadBufBytes),
+		eg:       NewEgressMeter(cfg.PerViewerBps),
+		shards:   cfg.Shards,
 	}
 }
 
