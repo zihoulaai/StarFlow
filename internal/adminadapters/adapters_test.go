@@ -1,6 +1,34 @@
 package adminadapters
 
-import "testing"
+import (
+	"errors"
+	"testing"
+
+	"github.com/starflow/push/internal/admin"
+	"github.com/starflow/push/internal/controlplane"
+)
+
+// The admin handler decides 404 against 500 by branching on this sentinel, so a
+// translated miss has to be matchable from outside this package. Translating
+// onto a private value would force the handler to compare error text instead.
+func TestTranslateExposesTheAdminNotFoundSentinel(t *testing.T) {
+	err := translate(controlplane.ErrNotFound)
+	if !errors.Is(err, admin.ErrNotFound) {
+		t.Errorf("translated miss = %v, want it to match admin.ErrNotFound", err)
+	}
+}
+
+// Anything that is not a miss must pass through untouched, or a store fault
+// would be reported to the operator as a tenant that does not exist.
+func TestTranslatePassesThroughEverythingElse(t *testing.T) {
+	fault := errors.New("dial tcp 10.0.0.4:5432: connection refused")
+	if got := translate(fault); !errors.Is(got, fault) {
+		t.Errorf("translate returned %v, want the original error", got)
+	}
+	if errors.Is(translate(fault), admin.ErrNotFound) {
+		t.Error("a store fault was translated into a not-found")
+	}
+}
 
 // The admin surface reports a terminate as successful when this returns true,
 // so the tenant has to reach the lookup rather than being dropped on the way

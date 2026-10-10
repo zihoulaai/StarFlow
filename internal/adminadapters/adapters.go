@@ -51,8 +51,6 @@ func (s *Store) refresh(tenantID string) {
 	}
 }
 
-var errNotFound = errors.New("adminadapters: not found")
-
 func (s *Store) ListTenants(ctx context.Context) ([]admin.TenantView, error) {
 	tenants, err := s.CP.ListTenants(ctx)
 	if err != nil {
@@ -236,9 +234,13 @@ func quotaView(q controlplane.Quota) admin.QuotaView {
 }
 
 // translate maps a control-plane miss onto the admin surface's error.
+//
+// The admin sentinel is exported so the handler can branch on it. Translating
+// onto a package-private value would leave every caller outside this package
+// unable to tell a miss from a fault without matching on the error text.
 func translate(err error) error {
 	if errors.Is(err, controlplane.ErrNotFound) {
-		return errNotFound
+		return admin.ErrNotFound
 	}
 	return err
 }

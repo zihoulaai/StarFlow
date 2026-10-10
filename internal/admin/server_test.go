@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,6 +22,11 @@ type fakeStore struct {
 	apps     map[string]AppView
 	quotas   map[string]QuotaView
 	channels map[string]ChannelView
+
+	// failReads, when set, is returned by the tenant and application reads
+	// instead of consulting the maps. It stands in for a store that is present
+	// but unreachable, which is a different condition from an absent row.
+	failReads error
 
 	nextID    int
 	rotations map[string]int
@@ -49,20 +55,15 @@ func (f *fakeStore) ListTenants(context.Context) ([]TenantView, error) {
 func (f *fakeStore) GetTenant(_ context.Context, id string) (TenantView, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failReads != nil {
+		return TenantView{}, f.failReads
+	}
 	t, ok := f.tenants[id]
 	if !ok {
 		return TenantView{}, ErrNotFound
 	}
 	return t, nil
 }
-
-// ErrNotFound mirrors the control plane's, so a handler can distinguish a
-// missing row from a store failure.
-var ErrNotFound = errNotFound{}
-
-type errNotFound struct{}
-
-func (errNotFound) Error() string { return "admin: not found" }
 
 func (f *fakeStore) CreateTenant(_ context.Context, name string) (TenantView, error) {
 	f.mu.Lock()
@@ -100,6 +101,9 @@ func (f *fakeStore) ListApplications(_ context.Context, tenantID string) ([]AppV
 func (f *fakeStore) GetApplication(_ context.Context, tenantID, id string) (AppView, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failReads != nil {
+		return AppView{}, f.failReads
+	}
 	a, ok := f.apps[id]
 	if !ok || a.TenantID != tenantID {
 		return AppView{}, ErrNotFound
@@ -336,7 +340,51 @@ func TestTenantIsScopedToThePrincipal(t *testing.T) {
 	}
 }
 
-// Every mutating operation must be attributable: who, when, against what.
+// A store that is unreachable is not evidence that the addressed tenant is
+// absent. Answering 404 to a database outage sends an operator to look for a
+// tenant that does not have a problem while the real fault goes unreported.
+func TestLookupDistinguishesAbsentFromUnreachable(t *testing.T) {
+	seed := func(t *testing.T) *adminFixture {
+		t.Helper()
+		f := newAdminFixture(t)
+		if rec := f.do(http.MethodPost, "/admin/tenants", "admin@example.com",
+			map[string]any{"name": "acme"}); rec.Code != http.StatusCreated {
+			t.Fatalf("seeding tenant: status %d", rec.Code)
+		}
+		return f
+	}
+
+	t.Run("an absent tenant is a 404", func(t *testing.T) {
+		f := seed(t)
+		rec := f.do(http.MethodGet, "/admin/tenants/nosuch", "admin@example.com", nil)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("status = %d for an absent tenant, want 404", rec.Code)
+		}
+	})
+
+	t.Run("an unreachable store is a 500", func(t *testing.T) {
+		f := seed(t)
+		f.store.failReads = errors.New("dial tcp 10.0.0.4:5432: connection refused")
+		rec := f.do(http.MethodGet, "/admin/tenants/nosuch", "admin@example.com", nil)
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("status = %d for an unreachable store, want 500", rec.Code)
+		}
+		if strings.Contains(rec.Body.String(), "connection refused") {
+			t.Error("the handler echoed the store's internal error text to the caller")
+		}
+	})
+
+	t.Run("an unreachable store reading an application is a 500", func(t *testing.T) {
+		f := seed(t)
+		f.store.failReads = errors.New("dial tcp 10.0.0.4:5432: connection refused")
+		rec := f.do(http.MethodGet, "/admin/applications/t1/nosuch", "admin@example.com", nil)
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("status = %d for an unreachable store, want 500", rec.Code)
+		}
+	})
+}
+
+// Every mutation must be attributable: who, when, against what.
 func TestEveryMutationIsAttributed(t *testing.T) {
 	f := newAdminFixture(t)
 

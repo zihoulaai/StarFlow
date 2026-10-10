@@ -25,6 +25,27 @@ var ErrUnauthorized = errors.New("admin: unauthorized")
 // ErrForbidden means the caller is known but lacks the required role.
 var ErrForbidden = errors.New("admin: forbidden")
 
+// ErrNotFound means the addressed tenant or application does not exist.
+//
+// It is a sentinel rather than a message so a store can distinguish a miss from
+// a failure without the handler matching on error text. The distinction decides
+// the status code: a miss is a 404, while a database that is unreachable is a
+// 500, and answering 404 to the latter tells an operator to fix a tenant that
+// does not have a problem.
+var ErrNotFound = errors.New("admin: not found")
+
+// writeLookupError answers a read that failed, separating a miss from a fault.
+//
+// Anything that is not ErrNotFound is reported as a server error: an unreachable
+// store is not evidence that the addressed tenant is absent.
+func writeLookupError(w http.ResponseWriter, err error, what string) {
+	if errors.Is(err, ErrNotFound) {
+		writeError(w, http.StatusNotFound, what+" not found")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "could not read "+what)
+}
+
 // Role is an administrative role.
 type Role string
 
@@ -291,7 +312,7 @@ func (s *Server) handleTenantByID(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		tenant, err := s.store.GetTenant(ctx, id)
 		if err != nil {
-			writeError(w, http.StatusNotFound, "tenant not found")
+			writeLookupError(w, err, "tenant")
 			return
 		}
 		writeJSON(w, http.StatusOK, tenant)
@@ -384,7 +405,7 @@ func (s *Server) handleApplicationByID(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		app, err := s.store.GetApplication(ctx, tenantID, id)
 		if err != nil {
-			writeError(w, http.StatusNotFound, "application not found")
+			writeLookupError(w, err, "application")
 			return
 		}
 		writeJSON(w, http.StatusOK, app)
