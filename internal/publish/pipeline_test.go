@@ -30,6 +30,18 @@ type harness struct {
 	// goroutine is admitting.
 	auditMu sync.Mutex
 	audit   []string
+
+	// observeMu guards observed, which the pipeline appends to from whichever
+	// goroutine is admitting.
+	observeMu sync.Mutex
+	observed  []string
+}
+
+// observedTenants returns the scopes Observe was called with.
+func (h *harness) observedTenants() []string {
+	h.observeMu.Lock()
+	defer h.observeMu.Unlock()
+	return append([]string(nil), h.observed...)
 }
 
 // auditOutcomes returns a copy of the recorded outcomes.
@@ -90,6 +102,11 @@ func newHarness(t *testing.T) *harness {
 			h.audit = append(h.audit, outcome)
 			h.auditMu.Unlock()
 		},
+		Observe: func(tenantID string, matched bool, now time.Time) {
+			h.observeMu.Lock()
+			h.observed = append(h.observed, tenantID)
+			h.observeMu.Unlock()
+		},
 	})
 	return h
 }
@@ -129,6 +146,27 @@ func TestAcceptedMessageGetsIdentityAndBody(t *testing.T) {
 	outcomes := h.auditOutcomes()
 	if len(outcomes) != 1 || outcomes[0] != string(OutcomeAccepted) {
 		t.Errorf("audit = %v, want one accepted entry", outcomes)
+	}
+}
+
+// The match-rate counters are keyed by tenant, so the scope Observe is handed
+// has to be the tenant. Passing the publishing subject instead buckets every
+// publisher together: one tenant's traffic lands in another's window, and a
+// tenant's rate becomes a function of how many distinct subjects it has rather
+// than of how much of its content matched.
+func TestObserveReportsTheTenantNotThePublishingSubject(t *testing.T) {
+	h := newHarness(t)
+	h.pipeline.Admit(h.req("hello"))
+
+	got := h.observedTenants()
+	if len(got) != 1 {
+		t.Fatalf("Observe called %d times, want 1", len(got))
+	}
+	if got[0] == h.req("hello").Subject {
+		t.Errorf("Observe received the publishing subject %q; the counters are keyed by tenant", got[0])
+	}
+	if got[0] != "t1" {
+		t.Errorf("Observe received scope %q, want the tenant %q", got[0], "t1")
 	}
 }
 

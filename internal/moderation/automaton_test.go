@@ -340,7 +340,7 @@ func TestAutomatonConcurrentEvaluate(t *testing.T) {
 }
 
 func TestMatchRateCounters(t *testing.T) {
-	c := newMatchCounters()
+	c := NewCounters()
 	now := time.UnixMilli(1_700_000_000_000)
 
 	for i := 0; i < 100; i++ {

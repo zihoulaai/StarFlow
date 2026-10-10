@@ -200,6 +200,7 @@ func build(ctx context.Context, cfg *config.Config, material []byte) (*applicati
 	}
 	pubReady := publish.NewReadiness(automaton, cache.Tenants())
 	pubReady.MarkBusUp(true)
+	matchCounters := moderation.NewCounters()
 
 	ids, err := newIDGen(cfg.Instance)
 	if err != nil {
@@ -223,7 +224,7 @@ func build(ctx context.Context, cfg *config.Config, material []byte) (*applicati
 		MaxMessageBytes:         config.DefaultMaxMessageBytes,
 		IDs:                     ids,
 		DefaultTTL:              5 * time.Second,
-		Observe:                 moderation.ObserveMatch,
+		Observe:                 matchCounters.Observe,
 		Audit:                   func(subject, channel, messageID, ruleID, outcome, detail string) {},
 		DuplicateEnabled:        func(string) bool { return true },
 		DuplicateContentEnabled: func(string) bool { return true },

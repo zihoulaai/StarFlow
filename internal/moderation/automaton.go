@@ -312,8 +312,12 @@ func (c *compiledSet) findAll(body []byte) []string {
 	return out
 }
 
-// matchCounters tracks match rates per tenant for the spike alert.
-type matchCounters struct {
+// Counters tracks match rates per tenant for the spike alert.
+//
+// It is held per instance rather than as package state so a process has one
+// explicit owner and the counter set can be constructed in a test without
+// reaching through the package.
+type Counters struct {
 	mu        sync.Mutex
 	perTenant map[string]*tenantCounters
 }
@@ -324,12 +328,13 @@ type tenantCounters struct {
 	publishes   int64
 }
 
-func newMatchCounters() *matchCounters {
-	return &matchCounters{perTenant: map[string]*tenantCounters{}}
+// NewCounters returns an empty counter set.
+func NewCounters() *Counters {
+	return &Counters{perTenant: map[string]*tenantCounters{}}
 }
 
 // Observe records a publish and whether it matched.
-func (c *matchCounters) Observe(tenantID string, matched bool, now time.Time) {
+func (c *Counters) Observe(tenantID string, matched bool, now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -350,7 +355,7 @@ func (c *matchCounters) Observe(tenantID string, matched bool, now time.Time) {
 }
 
 // MatchRate returns matches over publishes for a tenant in the current window.
-func (c *matchCounters) MatchRate(tenantID string) float64 {
+func (c *Counters) MatchRate(tenantID string) float64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	tc, ok := c.perTenant[tenantID]
@@ -358,21 +363,6 @@ func (c *matchCounters) MatchRate(tenantID string) float64 {
 		return 0
 	}
 	return float64(tc.matches) / float64(tc.publishes)
-}
-
-// globalCounters is the process-wide match-rate counter the pipeline consults
-// for spike alerting.
-var globalCounters = newMatchCounters()
-
-// ObserveMatch records a publish and whether it matched, for spike alerting.
-func ObserveMatch(tenantID string, matched bool, now time.Time) {
-	globalCounters.Observe(tenantID, matched, now)
-}
-
-// MatchRate returns a tenant's current sensitive word match rate, as matches
-// over publishes in the trailing minute.
-func MatchRate(tenantID string) float64 {
-	return globalCounters.MatchRate(tenantID)
 }
 
 // matchesPattern reports whether content contains pattern. A promotional

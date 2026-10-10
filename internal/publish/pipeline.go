@@ -137,8 +137,8 @@ type Deps struct {
 	DegradeBody []byte
 	// Audit records each decision.
 	Audit func(subject, channel, messageID, ruleID, outcome, detail string)
-	// Observe records match statistics for spike alerting.
-	Observe func(subject string, matched bool, now time.Time)
+	// Observe records match statistics for spike alerting, keyed by tenant.
+	Observe func(tenantID string, matched bool, now time.Time)
 }
 
 // Pipeline admits messages in a fixed stage order.
@@ -234,7 +234,7 @@ func (p *Pipeline) run(req Request) Result {
 	if d.Matcher != nil {
 		decision := d.Matcher.Evaluate(req.TenantID, body)
 		if d.Observe != nil {
-			d.Observe(req.Subject, len(decision.Matches) > 0, req.Now)
+			d.Observe(req.TenantID, len(decision.Matches) > 0, req.Now)
 		}
 		if !decision.Allowed {
 			return Result{Outcome: OutcomeBlocked, Stage: StageModeration,
