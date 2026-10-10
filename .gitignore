@@ -1,0 +1,7 @@
+# Node dependencies and build output for the TypeScript SDK and tooling.
+node_modules/
+sdk/dist/
+
+# Local editor and OS noise.
+.DS_Store
+*.swp

@@ -1,0 +1,9 @@
+.git
+openspec
+docs
+sdk/node_modules
+sdk/dist
+**/*_test.go
+**/test
+Dockerfile
+.dockerignore
