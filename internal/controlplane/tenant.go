@@ -16,7 +16,11 @@ import (
 // purely because the caller did not think to set the field.
 func (s *Store) CreateTenant(ctx context.Context, t Tenant) (Tenant, error) {
 	if t.ID == "" {
-		t.ID = NewID()
+		id, err := NewID()
+		if err != nil {
+			return Tenant{}, err
+		}
+		t.ID = id
 	}
 	if t.CreatedAt.IsZero() {
 		t.CreatedAt = s.now()
@@ -108,7 +112,11 @@ func (s *Store) UpdateTenant(ctx context.Context, id string, fn func(*Tenant)) (
 // flag.
 func (s *Store) CreateApplication(ctx context.Context, a Application, plaintextSecret string) (Application, string, error) {
 	if a.ID == "" {
-		a.ID = NewID()
+		id, err := NewID()
+		if err != nil {
+			return Application{}, "", err
+		}
+		a.ID = id
 	}
 	if a.AppKey == "" {
 		var err error

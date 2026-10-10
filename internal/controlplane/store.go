@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"time"
 )
 
@@ -34,14 +35,17 @@ func (s *Store) DB() *sql.DB { return s.db }
 func (s *Store) Now() time.Time { return s.now() }
 
 // NewID returns a random identifier suitable for a primary key.
-func NewID() string {
+//
+// The failure is returned rather than panicked. This is reachable from the
+// administrative HTTP surface, and a panic there escapes the package into an
+// arbitrary request goroutine, taking the process down over an error the caller
+// could have reported as a failed write.
+func NewID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand does not fail in practice; a panic here is preferable to
-		// silently issuing colliding identifiers.
-		panic("controlplane: crypto/rand unavailable: " + err.Error())
+		return "", fmt.Errorf("controlplane: generate id: %w", err)
 	}
-	return hex.EncodeToString(b[:])
+	return hex.EncodeToString(b[:]), nil
 }
 
 // HashSecret returns the stored form of an application secret.

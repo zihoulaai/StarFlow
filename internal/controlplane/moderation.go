@@ -21,7 +21,11 @@ func (s *Store) UpsertRule(ctx context.Context, r ModerationRule) (ModerationRul
 	}
 	creating := r.ID == ""
 	if creating {
-		r.ID = NewID()
+		id, err := NewID()
+		if err != nil {
+			return ModerationRule{}, err
+		}
+		r.ID = id
 		r.Enabled = true
 	}
 	if r.Action == "" {
@@ -107,7 +111,11 @@ func (s *Store) CreateRestriction(ctx context.Context, r Restriction) (Restricti
 		return Restriction{}, fmt.Errorf("controlplane: restriction requires tenant, subject kind, subject id and action")
 	}
 	if r.ID == "" {
-		r.ID = NewID()
+		id, err := NewID()
+		if err != nil {
+			return Restriction{}, err
+		}
+		r.ID = id
 	}
 	if r.CreatedAt.IsZero() {
 		r.CreatedAt = s.now()
@@ -213,7 +221,11 @@ func (s *Store) CreateNetworkBlock(ctx context.Context, b NetworkBlock) (Network
 		return NetworkBlock{}, fmt.Errorf("controlplane: network block requires a tenant id and a cidr")
 	}
 	if b.ID == "" {
-		b.ID = NewID()
+		id, err := NewID()
+		if err != nil {
+			return NetworkBlock{}, err
+		}
+		b.ID = id
 	}
 	if b.CreatedAt.IsZero() {
 		b.CreatedAt = s.now()
@@ -290,7 +302,11 @@ func (s *Store) UpsertAdminPrincipal(ctx context.Context, p AdminPrincipal) (Adm
 		return AdminPrincipal{}, err
 	}
 	if !exists {
-		p.ID = NewID()
+		id, err := NewID()
+		if err != nil {
+			return AdminPrincipal{}, err
+		}
+		p.ID = id
 		p.Enabled = true
 	}
 
