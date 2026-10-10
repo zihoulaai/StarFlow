@@ -241,7 +241,7 @@ func Load(getenv func(string) string) (*Config, error) {
 		},
 
 		Runtime: RuntimeConfig{
-			MemLimitBytes: l.int64Ptr("GOMEMLIMIT_BYTES"),
+			MemLimitBytes: l.requiredInt64("GOMEMLIMIT_BYTES"),
 			GOGC:          l.int("GOGC", 400),
 			GOMAXPROCS:    l.int("GOMAXPROCS", 0),
 		},
@@ -264,7 +264,7 @@ func (c *Config) Validate() error {
 	// name an administrator with no identity, and a subject without a tenant has
 	// no scope to administer.
 	if (c.ControlPlane.BootstrapTenant == "") != (c.ControlPlane.BootstrapSubject == "") {
-		return fmt.Errorf("config: BOOTSTRAP_TENANT and BOOTSTRAP_SUBJECT must be set together")
+		return errors.New("config: BOOTSTRAP_TENANT and BOOTSTRAP_SUBJECT must be set together")
 	}
 	if c.ControlPlane.BootstrapSubject != "" {
 		if c.ControlPlane.BootstrapRole != "admin" && c.ControlPlane.BootstrapRole != "viewer" {
@@ -282,25 +282,25 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: BUS_ADDR is required when BUS_KIND is \"redis\"")
 	}
 	if c.Bus.Channel == "" || c.Bus.ConfigChannel == "" {
-		return fmt.Errorf("config: bus channels must not be empty")
+		return errors.New("config: bus channels must not be empty")
 	}
 	if c.ControlPlane.SecretSource != "env" && c.ControlPlane.SecretSource != "file" {
 		return fmt.Errorf("config: SECRET_SOURCE must be \"env\" or \"file\", got %q", c.ControlPlane.SecretSource)
 	}
 	if c.ControlPlane.SecretRef == "" {
-		return fmt.Errorf("config: SECRET_REF must name the signing material to read")
+		return errors.New("config: SECRET_REF must name the signing material to read")
 	}
 	if c.Delivery.FlushInterval <= 0 {
-		return fmt.Errorf("config: DELIVERY_FLUSH_INTERVAL must be positive")
+		return errors.New("config: DELIVERY_FLUSH_INTERVAL must be positive")
 	}
 	if c.Delivery.WriteBufferBytes <= 0 {
-		return fmt.Errorf("config: DELIVERY_WRITE_BUFFER_BYTES must be positive")
+		return errors.New("config: DELIVERY_WRITE_BUFFER_BYTES must be positive")
 	}
 	if c.Delivery.ReadBufferBytes <= 0 {
-		return fmt.Errorf("config: DELIVERY_READ_BUFFER_BYTES must be positive")
+		return errors.New("config: DELIVERY_READ_BUFFER_BYTES must be positive")
 	}
 	if c.Delivery.MergeRatio <= 0 {
-		return fmt.Errorf("config: DELIVERY_MERGE_RATIO must be positive")
+		return errors.New("config: DELIVERY_MERGE_RATIO must be positive")
 	}
 	// Compression is coupled to coalescing by measurement, not preference. The
 	// threshold is checked against the merge target because a threshold below 2
@@ -314,25 +314,25 @@ func (c *Config) Validate() error {
 			"threshold must be at least 2", c.Delivery.CompressBatchThreshold)
 	}
 	if c.Delivery.PerViewerBytesPerSecond <= 0 {
-		return fmt.Errorf("config: DELIVERY_PER_VIEWER_BPS must be positive")
+		return errors.New("config: DELIVERY_PER_VIEWER_BPS must be positive")
 	}
 	if c.Delivery.Shards <= 0 {
-		return fmt.Errorf("config: DELIVERY_SHARDS must be positive")
+		return errors.New("config: DELIVERY_SHARDS must be positive")
 	}
 	if c.Delivery.HeartbeatInterval <= 0 || c.Delivery.HeartbeatTimeout <= 0 {
-		return fmt.Errorf("config: heartbeat interval and timeout must be positive")
+		return errors.New("config: heartbeat interval and timeout must be positive")
 	}
 	if c.Delivery.DrainGracePeriod < 0 {
-		return fmt.Errorf("config: DELIVERY_DRAIN_GRACE must not be negative")
+		return errors.New("config: DELIVERY_DRAIN_GRACE must not be negative")
 	}
 	if c.Delivery.TokenTTL <= 0 || c.Delivery.TokenSkew < 0 {
-		return fmt.Errorf("config: AUTH_TOKEN_TTL must be positive and AUTH_TOKEN_SKEW must not be negative")
+		return errors.New("config: AUTH_TOKEN_TTL must be positive and AUTH_TOKEN_SKEW must not be negative")
 	}
 	if c.Runtime.GOGC < 0 {
-		return fmt.Errorf("config: GOGC must not be negative")
+		return errors.New("config: GOGC must not be negative")
 	}
 	if c.ControlPlane.MaxOpenConns < 0 {
-		return fmt.Errorf("config: CONTROL_MAX_OPEN_CONNS must not be negative")
+		return errors.New("config: CONTROL_MAX_OPEN_CONNS must not be negative")
 	}
 	return nil
 }
@@ -393,10 +393,15 @@ func (l *loader) int64(key string, def int64) int64 {
 	return v
 }
 
-// int64Ptr distinguishes "absent" from "set to zero", which int64 cannot: an
-// absent memory limit must be an error while an explicit zero is merely
-// invalid, and both have to be rejected rather than defaulted.
-func (l *loader) int64Ptr(key string) int64 {
+// requiredInt64 reads an integer that has no fallback.
+//
+// An absent value stays absent rather than becoming a default: a memory limit
+// that silently fell back to the unlimited case would look configured and then
+// fail every allocation-heavy publish with no error anywhere. Both an unset and
+// an unparseable value therefore surface as non-positive and are rejected by
+// Validate rather than defaulted. It returns an int64, not a pointer; the
+// absence is carried by the value, not by a nil.
+func (l *loader) requiredInt64(key string) int64 {
 	raw := strings.TrimSpace(l.getenv(key))
 	if raw == "" {
 		return 0

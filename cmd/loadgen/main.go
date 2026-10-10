@@ -373,13 +373,6 @@ func percentileMs(sorted []time.Duration, q float64) float64 {
 	return float64(sorted[idx].Nanoseconds()) / 1e6
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "loadgen: "+format+"\n", args...)
 	os.Exit(2)

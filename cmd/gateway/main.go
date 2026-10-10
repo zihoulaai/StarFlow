@@ -66,7 +66,7 @@ func run() error {
 		// Failing here rather than starting is deliberate. An instance running
 		// without signing material would refuse every credential, and would look
 		// like a network fault rather than a configuration one.
-		return fmt.Errorf("signing material: %w (source %s)", err, src.Name())
+		return fmt.Errorf("signing material from source %s: %w", src.Name(), err)
 	}
 	if len(material) == 0 {
 		return fmt.Errorf("signing material resolved empty (source %s)", src.Name())

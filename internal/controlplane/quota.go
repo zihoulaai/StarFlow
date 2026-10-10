@@ -15,7 +15,7 @@ import (
 // written from a struct literal would silently switch both filters off.
 func (s *Store) UpsertQuota(ctx context.Context, q Quota) (Quota, error) {
 	if q.TenantID == "" {
-		return Quota{}, fmt.Errorf("controlplane: quota requires a tenant id")
+		return Quota{}, errors.New("controlplane: quota requires a tenant id")
 	}
 	if q.PublishFailurePolicy == "" {
 		q.PublishFailurePolicy = PolicyFailFast
@@ -98,7 +98,7 @@ func (s *Store) GetQuota(ctx context.Context, tenantID string) (Quota, error) {
 // "derive it" and is stored as NULL so a later read reproduces the absence.
 func (s *Store) UpsertChannelConfig(ctx context.Context, c ChannelConfig) (ChannelConfig, error) {
 	if c.TenantID == "" || c.Channel == "" {
-		return ChannelConfig{}, fmt.Errorf("controlplane: channel config requires a tenant id and a channel")
+		return ChannelConfig{}, errors.New("controlplane: channel config requires a tenant id and a channel")
 	}
 	c.UpdatedAt = s.now()
 

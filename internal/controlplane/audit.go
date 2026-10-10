@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -14,10 +15,10 @@ import (
 // moderated message.
 func (s *Store) AppendAudit(ctx context.Context, e AuditEntry) error {
 	if e.TenantID == "" {
-		return fmt.Errorf("controlplane: audit entry requires a tenant id")
+		return errors.New("controlplane: audit entry requires a tenant id")
 	}
 	if e.Kind == "" || e.Decision == "" {
-		return fmt.Errorf("controlplane: audit entry requires a kind and a decision")
+		return errors.New("controlplane: audit entry requires a kind and a decision")
 	}
 	if e.At.IsZero() {
 		e.At = s.now()
@@ -62,7 +63,7 @@ type AuditQuery struct {
 // regardless of the filters supplied.
 func (s *Store) QueryAudit(ctx context.Context, q AuditQuery) ([]AuditEntry, error) {
 	if q.TenantID == "" {
-		return nil, fmt.Errorf("controlplane: audit query requires a tenant id")
+		return nil, errors.New("controlplane: audit query requires a tenant id")
 	}
 
 	query := `SELECT id, tenant_id, at_ms, kind, subject, channel, message_id, rule_id, decision, body

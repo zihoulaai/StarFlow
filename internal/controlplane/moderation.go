@@ -17,7 +17,7 @@ import (
 // one.
 func (s *Store) UpsertRule(ctx context.Context, r ModerationRule) (ModerationRule, error) {
 	if r.TenantID == "" || r.Pattern == "" {
-		return ModerationRule{}, fmt.Errorf("controlplane: rule requires a tenant id and a pattern")
+		return ModerationRule{}, errors.New("controlplane: rule requires a tenant id and a pattern")
 	}
 	creating := r.ID == ""
 	if creating {
@@ -108,7 +108,7 @@ func (s *Store) DeleteRule(ctx context.Context, tenantID, ruleID string) error {
 // restriction that does not lapse.
 func (s *Store) CreateRestriction(ctx context.Context, r Restriction) (Restriction, error) {
 	if r.TenantID == "" || r.SubjectID == "" || r.SubjectKind == "" || r.Action == "" {
-		return Restriction{}, fmt.Errorf("controlplane: restriction requires tenant, subject kind, subject id and action")
+		return Restriction{}, errors.New("controlplane: restriction requires tenant, subject kind, subject id and action")
 	}
 	if r.ID == "" {
 		id, err := NewID()
@@ -218,7 +218,7 @@ func (s *Store) DeleteRestriction(ctx context.Context, tenantID, id string) erro
 // the operator's list.
 func (s *Store) CreateNetworkBlock(ctx context.Context, b NetworkBlock) (NetworkBlock, error) {
 	if b.TenantID == "" || b.CIDR == "" {
-		return NetworkBlock{}, fmt.Errorf("controlplane: network block requires a tenant id and a cidr")
+		return NetworkBlock{}, errors.New("controlplane: network block requires a tenant id and a cidr")
 	}
 	if b.ID == "" {
 		id, err := NewID()
@@ -288,7 +288,7 @@ func (s *Store) DeleteNetworkBlock(ctx context.Context, tenantID, id string) err
 // administrative call. Use SetAdminPrincipalEnabled to withdraw access.
 func (s *Store) UpsertAdminPrincipal(ctx context.Context, p AdminPrincipal) (AdminPrincipal, error) {
 	if p.TenantID == "" || p.Subject == "" {
-		return AdminPrincipal{}, fmt.Errorf("controlplane: admin principal requires a tenant id and a subject")
+		return AdminPrincipal{}, errors.New("controlplane: admin principal requires a tenant id and a subject")
 	}
 	if p.Role == "" {
 		p.Role = RoleViewer

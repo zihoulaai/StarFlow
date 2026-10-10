@@ -72,7 +72,9 @@ func NewFile(path string) *FileSource { return &FileSource{Path: path} }
 func (s *FileSource) Load() ([]byte, error) {
 	b, err := os.ReadFile(s.Path)
 	if err != nil {
-		return nil, fmt.Errorf("secret: read %s: %w", s.Path, err)
+		// os.ReadFile already reports the path through *fs.PathError, so
+		// repeating it here would say the same thing twice.
+		return nil, err
 	}
 	b = []byte(strings.TrimSpace(string(b)))
 	if len(b) == 0 {

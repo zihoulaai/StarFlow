@@ -156,7 +156,7 @@ func (t *Transport) serveSub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := t.hello(r, ws)
+	conn, err := t.acceptHello(r, ws)
 	if err != nil {
 		_ = ws.WriteMessage(websocket.TextMessage, mustJSON(map[string]any{
 			"op": "error", "reason": "authentication", "message": err.Error(),
@@ -200,13 +200,13 @@ type clientFrame struct {
 	Channels []string `json:"channels,omitempty"`
 }
 
-// hello authenticates the client and creates its connection.
+// acceptHello authenticates the client and creates its connection.
 //
 // Authentication happens after the upgrade because the credential is a field in
 // the client's first message rather than a header: the SDK sends the token in
 // `hello`. The connection is therefore briefly upgraded but unauthenticated,
 // which is why the read deadline here is bounded.
-func (t *Transport) hello(r *http.Request, ws *websocket.Conn) (*Conn, error) {
+func (t *Transport) acceptHello(r *http.Request, ws *websocket.Conn) (*Conn, error) {
 	_ = ws.SetReadDeadline(t.cfg.Now().Add(t.cfg.HandshakeTimeout))
 
 	_, data, err := ws.ReadMessage()

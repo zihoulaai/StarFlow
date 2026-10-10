@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -52,7 +53,7 @@ func NewRedisBus(cfg RedisConfig, msgChannel, cfgChannel string) (*RedisBus, err
 	var client redis.UniversalClient
 	switch len(cfg.Addrs) {
 	case 0:
-		return nil, fmt.Errorf("bus: at least one redis address is required")
+		return nil, errors.New("bus: at least one redis address is required")
 	case 1:
 		client = redis.NewClient(&redis.Options{
 			Addr:        cfg.Addrs[0],

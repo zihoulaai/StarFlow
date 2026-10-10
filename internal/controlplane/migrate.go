@@ -185,8 +185,10 @@ func Migrate(ctx context.Context, db *sql.DB, now time.Time) error {
 		for _, stmt := range m.Statements {
 			if _, err := tx.ExecContext(ctx, stmt); err != nil {
 				_ = tx.Rollback()
-				return fmt.Errorf("controlplane: migration %d (%s): %w\n%s",
-					m.Version, m.Name, err, stmt)
+				// The failing statement is appended after the wrapped error so
+				// the message reads newest to oldest like the rest of the chain.
+				return fmt.Errorf("controlplane: migration %d (%s) on statement:\n%s: %w",
+					m.Version, m.Name, stmt, err)
 			}
 		}
 		if _, err := tx.ExecContext(ctx,

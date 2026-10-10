@@ -147,7 +147,8 @@ func (s *Store) CreateApplication(ctx context.Context, a Application, plaintextS
 		var err error
 		plaintextSecret, err = NewSecret()
 		if err != nil {
-			return Application{}, "", fmt.Errorf("controlplane: generate secret: %w", err)
+			// NewSecret already says what failed; re-wrapping would repeat it.
+			return Application{}, "", err
 		}
 	}
 	a.SecretHash = HashSecret(plaintextSecret)

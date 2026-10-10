@@ -83,7 +83,7 @@ func NewSigner(key []byte, ttl, skew time.Duration, now func() time.Time) *Signe
 // application from the key it names.
 func (s *Signer) Issue(appKey, subject, tenantID string) (string, error) {
 	if appKey == "" {
-		return "", fmt.Errorf("auth: issue requires an app key")
+		return "", errors.New("auth: issue requires an app key")
 	}
 	now := s.now()
 	claims := Claims{
