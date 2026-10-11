@@ -2,6 +2,12 @@
 node_modules/
 sdk/dist/
 
+# Build output
+bin/
+
+# Local databases
+*.db
+
 # Local editor and OS noise.
 .DS_Store
 *.swp
