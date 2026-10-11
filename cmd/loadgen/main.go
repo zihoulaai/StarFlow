@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -463,6 +464,16 @@ func (r *report) checkDelivery() {
 		r.Failures = append(r.Failures, fmt.Sprintf(
 			"%d of %d connections ready", d.Ready, r.TargetConns))
 	}
+	if d.Samples == 0 {
+		// Deliveries were counted but no arrival matched a published message, so
+		// every percentile below reads zero. Reporting that as a fast, in-budget
+		// delivery would turn a measurement that never happened into a passing
+		// capacity claim, which is the one thing this tool must not do.
+		r.Failures = append(r.Failures, fmt.Sprintf(
+			"%d deliveries but no arrival matched a published message, so no delivery latency was measured",
+			d.Delivered))
+		return
+	}
 	if d.Delivered == 0 && r.Accepted > 0 {
 		// The dangerous case: every publish was admitted and nothing reached a
 		// viewer. Passing the publish budgets says nothing about delivery, so
@@ -573,10 +584,19 @@ func (r report) writeJSON(path string) error {
 	return os.WriteFile(path, append(b, '\n'), 0o644)
 }
 
+// percentileMs returns the q quantile of a sample.
+//
+// It sorts a copy because the subscriber half records arrivals as probes race to
+// them, so the slice is in no useful order. Indexing it directly made p50 land
+// above p95, which is impossible for a quantile and was the only clue that the
+// distribution was being read from an unsorted sample rather than that the
+// service had behaved impossibly.
 func percentileMs(sorted []time.Duration, q float64) float64 {
 	if len(sorted) == 0 {
 		return 0
 	}
+	sorted = append([]time.Duration(nil), sorted...)
+	slices.Sort(sorted)
 	idx := int(float64(len(sorted)) * q)
 	if idx >= len(sorted) {
 		idx = len(sorted) - 1

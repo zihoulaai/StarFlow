@@ -372,6 +372,7 @@ func (s *subscribers) snapshot(elapsed time.Duration) subscriberReport {
 		Delivered:     s.delivered.Load(),
 		BytesIn:       s.bytesIn.Load(),
 		GapNotices:    s.gapNotices.Load(),
+		Samples:       len(lat),
 		DeliveryP50Ms: percentileMs(lat, 0.50),
 		DeliveryP95Ms: percentileMs(lat, 0.95),
 		DeliveryP99Ms: percentileMs(lat, 0.99),
@@ -418,6 +419,11 @@ type subscriberReport struct {
 	DeliveryP99Ms float64 `json:"delivery_p99_ms"`
 	DeliveryMaxMs float64 `json:"delivery_max_ms"`
 
+	// Samples is how many arrivals produced a latency figure. It is separate
+	// from Delivered because deliveries are counted on every connection while
+	// only the probes can match, so the two diverge as soon as the probes miss.
+	Samples int `json:"latency_samples"`
+
 	DurationSec float64 `json:"duration_seconds"`
 	// EgressBytesPerSec is what the instance actually pushed to its
 	// subscribers. The capacity model derives instance count from this figure,
@@ -449,7 +455,11 @@ func (r subscriberReport) print(w io.Writer) {
 		f("gap notices         %d  (content dropped for a slow subscriber)\n", r.GapNotices)
 	}
 	if r.Delivered > 0 {
-		f("delivery p50        %.1f ms\n", r.DeliveryP50Ms)
+		if r.Samples == 0 {
+			f("delivery latency    NOT MEASURED (no arrival matched a published message)\n")
+			return
+		}
+		f("delivery p50        %.1f ms  (%d samples)\n", r.DeliveryP50Ms, r.Samples)
 		f("delivery p95        %.1f ms\n", r.DeliveryP95Ms)
 		f("delivery p99        %.1f ms\n", r.DeliveryP99Ms)
 		f("delivery max        %.1f ms\n", r.DeliveryMaxMs)

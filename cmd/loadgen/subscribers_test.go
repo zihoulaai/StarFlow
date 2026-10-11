@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -227,7 +228,7 @@ func TestDeliveryVerdictPassesWhenEverythingArrives(t *testing.T) {
 	r := report{
 		Accepted:    100,
 		TargetConns: 10,
-		Delivery:    &subscriberReport{Ready: 10, Delivered: 1000, DeliveryP99Ms: 12},
+		Delivery:    &subscriberReport{Ready: 10, Delivered: 1000, Samples: 100, DeliveryP99Ms: 12},
 	}
 	r.checkDelivery()
 	if !r.Conforms {
@@ -257,7 +258,7 @@ func TestDeliveryVerdictUsesTheDocumentedBudgets(t *testing.T) {
 		Accepted:    100,
 		TargetConns: 10,
 		Delivery: &subscriberReport{
-			Ready: 10, Delivered: 1000,
+			Ready: 10, Delivered: 1000, Samples: 100,
 			DeliveryP50Ms: 60, DeliveryP95Ms: 120, DeliveryP99Ms: 250,
 		},
 	}
@@ -270,13 +271,64 @@ func TestDeliveryVerdictUsesTheDocumentedBudgets(t *testing.T) {
 		Accepted:    100,
 		TargetConns: 10,
 		Delivery: &subscriberReport{
-			Ready: 10, Delivered: 1000,
+			Ready: 10, Delivered: 1000, Samples: 100,
 			DeliveryP50Ms: 10, DeliveryP95Ms: 20, DeliveryP99Ms: 30,
 		},
 	}
 	under.checkDelivery()
 	if !under.Conforms {
 		t.Errorf("a fast delivery run failed: %v", under.Failures)
+	}
+}
+
+// Percentiles only mean anything read off a sorted sample. The subscriber half
+// records arrivals in the order probes race to them, so a percentile read
+// straight off that slice could put p50 above p95 — a distribution that is
+// impossible, and silently wrong rather than obviously broken.
+func TestPercentilesAreMonotonicRegardlessOfArrivalOrder(t *testing.T) {
+	var unsorted []time.Duration
+	for i := 0; i < 200; i++ {
+		unsorted = append(unsorted, time.Duration((i*37)%199+1)*time.Millisecond)
+	}
+
+	p50 := percentileMs(unsorted, 0.50)
+	p95 := percentileMs(unsorted, 0.95)
+	p99 := percentileMs(unsorted, 0.99)
+	if !(p50 <= p95 && p95 <= p99) {
+		t.Errorf("p50 %.1f, p95 %.1f, p99 %.1f are not monotonic", p50, p95, p99)
+	}
+
+	// The result is in milliseconds, so the quantile of 1..10 ms at p50 is
+	// element 5, which is 6 ms.
+	sortedSample := []time.Duration{time.Millisecond, 2 * time.Millisecond, 3 * time.Millisecond,
+		4 * time.Millisecond, 5 * time.Millisecond, 6 * time.Millisecond, 7 * time.Millisecond,
+		8 * time.Millisecond, 9 * time.Millisecond, 10 * time.Millisecond}
+	if got := percentileMs(sortedSample, 0.50); got != 6 {
+		t.Errorf("p50 of 1..10ms = %v, want 6", got)
+	}
+	if got := percentileMs(sortedSample, 0.99); got != 10 {
+		t.Errorf("p99 of 1..10ms = %v, want 10", got)
+	}
+}
+
+// A run that counted deliveries but produced no latency sample has measured
+// nothing. Every percentile reads zero, so without this guard a run that never
+// observed a delivery would be reported as an in-budget one.
+func TestDeliveryVerdictFailsWhenNoLatencyWasMeasured(t *testing.T) {
+	r := report{
+		Accepted:    100,
+		TargetConns: 10,
+		Delivery: &subscriberReport{
+			Ready: 10, Delivered: 3490214, Samples: 0,
+			DeliveryP50Ms: 0, DeliveryP95Ms: 0, DeliveryP99Ms: 0,
+		},
+	}
+	r.checkDelivery()
+	if r.Conforms {
+		t.Error("a run with no latency samples conformed")
+	}
+	if len(r.Failures) == 0 || !strings.Contains(r.Failures[0], "no delivery latency was measured") {
+		t.Errorf("failure does not say the measurement was missing: %v", r.Failures)
 	}
 }
 
