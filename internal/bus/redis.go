@@ -78,17 +78,6 @@ func NewRedisBus(cfg RedisConfig, msgChannel, cfgChannel string) (*RedisBus, err
 	}, nil
 }
 
-// NewRedisBusWithClient wraps an existing client, which is what tests and
-// multi-tenant deployments use so the connection lifecycle stays owned by the
-// caller.
-func NewRedisBusWithClient(client redis.UniversalClient, msgChannel, cfgChannel string) *RedisBus {
-	return &RedisBus{
-		client:     client,
-		msgChannel: msgChannel,
-		cfgChannel: cfgChannel,
-	}
-}
-
 // Publish broadcasts an envelope.
 func (b *RedisBus) Publish(ctx context.Context, env Envelope) error {
 	b.mu.Lock()

@@ -340,8 +340,7 @@ func (a *Authorizer) RoleFor(ctx context.Context, tenantID, subject string) (adm
 // refusing it would leave the operator unsure whether it applied. The error is
 // therefore surfaced for the caller to log rather than propagated.
 type Auditor struct {
-	CP  *controlplane.Store
-	Now func() (int64, int64)
+	CP *controlplane.Store
 
 	mu    sync.Mutex
 	fails int
