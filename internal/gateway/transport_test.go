@@ -69,9 +69,9 @@ func newTestTransport(r authenticator, lim connLimiter) (*Transport, *Store, *Li
 		HeartbeatTimeout:  time.Hour,
 		DrainGrace:        time.Second,
 	}, time.Now)
-	m := &countingMetrics{}
+	spyMetrics := &countingMetrics{}
 	tr := NewTransport(TransportConfig{
-		Store: store, Shards: shards, Lifecycle: life, Metrics: m,
+		Store: store, Shards: shards, Lifecycle: life, Metrics: spyMetrics,
 		Resolver: r, Limiter: lim,
 		Policies:                func(string) map[string]ChannelPolicy { return nil },
 		WriteBufferBytes:        16384,
@@ -81,7 +81,7 @@ func newTestTransport(r authenticator, lim connLimiter) (*Transport, *Store, *Li
 		HandshakeTimeout:        5 * time.Second,
 		WriteTimeout:            5 * time.Second,
 	})
-	return tr, store, life, m
+	return tr, store, life, spyMetrics
 }
 
 func dialSub(t *testing.T, tr *Transport) *websocket.Conn {

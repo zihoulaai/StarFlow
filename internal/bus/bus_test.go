@@ -240,27 +240,36 @@ func runContract(t *testing.T, c contract) {
 		})
 
 		t.Run("doesNotRetainSubscribersAfterCancellation", func(t *testing.T) {
-			memBus := bus.NewMemoryBus()
-			ctx, cancel := context.WithCancel(context.Background())
-			if err := memBus.Subscribe(ctx, func(bus.Envelope) {}); err != nil {
-				t.Fatalf("Subscribe: %v", err)
-			}
-			if memBus.Subscribers() != 1 {
-				t.Fatalf("subscribers = %d, want 1", memBus.Subscribers())
-			}
-			cancel()
-
-			// A leaked subscription would keep receiving envelopes forever,
-			// holding a goroutine per cancelled context.
-			deadline := time.Now().Add(time.Second)
-			for time.Now().Before(deadline) && memBus.Subscribers() != 0 {
-				time.Sleep(time.Millisecond)
-			}
-			if got := memBus.Subscribers(); got != 0 {
-				t.Errorf("subscribers after cancel = %d, want 0", got)
-			}
+			// Subscribers() is not part of the Bus interface, so this property
+			// is only observable on MemoryBus. Testing it here against a hard
+			// coded memory bus would report the contract passing for every
+			// implementation while only ever exercising one; see
+			// TestMemoryBusReleasesSubscribersOnCancel for the assertion itself.
+			t.Skip("assertion requires Subscribers(), which only MemoryBus exposes")
 		})
 	})
+}
+
+// A leaked subscription would keep receiving envelopes forever, holding a
+// goroutine per cancelled context.
+func TestMemoryBusReleasesSubscribersOnCancel(t *testing.T) {
+	memBus := bus.NewMemoryBus()
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := memBus.Subscribe(ctx, func(bus.Envelope) {}); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if memBus.Subscribers() != 1 {
+		t.Fatalf("subscribers = %d, want 1", memBus.Subscribers())
+	}
+	cancel()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && memBus.Subscribers() != 0 {
+		time.Sleep(time.Millisecond)
+	}
+	if got := memBus.Subscribers(); got != 0 {
+		t.Errorf("subscribers after cancel = %d, want 0", got)
+	}
 }
 
 // TestBusContract runs the shared suite against every registered bus. A new
