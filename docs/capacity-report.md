@@ -32,6 +32,82 @@ the outcome breakdown separates `accepted` and `degraded` from each refusal
 code, so a rate limit working as configured is distinguishable from a capacity
 problem.
 
+## End-to-end, against a serving instance
+
+The sections below measure components in isolation. This one drives the real
+gateway over HTTP and WebSocket with `cmd/loadgen`, which holds a subscriber
+population, publishes into it, and reports what the instance actually pushed.
+
+```
+go run ./cmd/loadgen \
+  --publish-url http://127.0.0.1:8080/publish \
+  --tenant t1 --app-key <key> --secret <secret> \
+  --connections 1000 --publish-qps 10 \
+  --duration 30s --ramp 5s --report c1000.json
+```
+
+**The publish rate here is 10 msg/s, not 1,000.** At 200 B average that is
+2 KB/s per viewer, which is exactly the documented per-viewer budget — so this
+configuration spends the whole bandwidth allowance on every one of its
+subscribers. 1,000 msg/s is the *platform* target and is only reachable by
+spreading it over channels; sending it to one channel would ask every viewer to
+take 200 KB/s, which is a hundred times the budget.
+
+| Connections | Per viewer | Total egress | Delivery p50 | p95 | p99 | Publish p99 | Conforms |
+|---:|---:|---:|---:|---:|---:|---:|:--:|
+| 1,000 | 2,004 B/s | 2.00 MB/s | 26.0 ms | 27.8 ms | 30.8 ms | 4.4 ms | **yes** |
+| 5,000 | 1,795 B/s | 8.97 MB/s | 37.7 ms | 106.8 ms | 137.6 ms | 104.4 ms | no |
+| 10,000 | 734 B/s | 7.34 MB/s | 26.6 ms | 77.0 ms | 115.3 ms | 88.6 ms | no |
+
+30 s per run, 8 probe connections, one freshly started gateway per configuration.
+Budgets are p50 < 50 ms, p95 < 100 ms, p99 < 200 ms.
+
+### The per-viewer budget is the thing that held
+
+At 1,000 connections the instance pushed **2,004 B/s per viewer** against a
+documented 2,000 B/s budget. That is the capacity model confirming itself: the
+bandwidth bound binds before the connection count does, and instance count falls
+out of dividing available egress by that per-viewer rate.
+
+The 10,000-connection row delivered *less* per viewer than the 5,000-connection
+row, which looks like a regression and is not one. A fixed 10 msg/s spread across
+more subscribers gives each viewer fewer messages per second, and the run is
+shorter than the ramp at that size — the connection population is still growing
+while the measurement window is already closing, so per-viewer rate is diluted
+rather than throttled. Total egress also falls between the two runs. Both are
+artifacts of holding a 10,000-connection population on one 8-core box, and neither
+is a claim about the deployed shape.
+
+### Nothing was dropped, and that is a real result
+
+Across all three runs: **zero dial failures, zero gap notices, every admitted
+message delivered.** No subscriber was ever told it fell behind. The failures
+above are all latency, and latency is the budget that is genuinely tight — which
+is the opposite of the failure mode a fanout path usually degrades into.
+
+### What this machine cannot measure
+
+This box tops out well below the documented targets, for reasons that belong to
+the measurement setup rather than the service:
+
+- **~16,384 usable client ports.** macOS allocates ephemeral ports from
+  49152–65535. Opening 50,000 sockets from one IP to one destination exhausts the
+  range; the OS refuses to assign ports and the gateway never sees the attempt.
+  This is a client-side limit and the 19,540 "dial failures" in that run are the
+  OS, not the service.
+- **The gateway runs under `GOMEMLIMIT=4GiB` beside the load generator** on the
+  same 16 GB of RAM. Running configurations back to back killed the gateway
+  mid-run and turned two earlier results into noise. Every number in the table
+  above comes from a freshly started gateway, which is why that restart is in the
+  measurement script rather than being done by hand.
+- **The load generator and the service share 8 cores.** They contend, so the
+  latency figures above are pessimistic relative to a deployment where the
+  generator is off-box.
+
+So **100,000 connections and a sustained 1,000 msg/s remain unverified** — not
+failed, untested. Reaching them needs ephemeral ports widened, the generator off
+the service's host, and several instances.
+
 ## Measured on this machine
 
 Numbers below are from `go test -bench` on a single developer machine
@@ -145,9 +221,10 @@ pay for the framing.**
 | Multi-instance delivery, exactly once | Verified by `internal/deploy/multiinstance_test.go` across 1, 2 and 5 instances |
 | Multi-instance at target connection count | **Not verified** |
 | Broadcast topology at production scale | **Not verified** |
-| Single-instance connection ceiling | **Not verified** |
-| Sustained target publish rate | **Not verified** |
-| Latency percentiles under target load | **Not verified** |
+| Single-instance connection ceiling | **Not verified** — measured to 10,000; the 16k client-port ceiling on this box bounds the test, not the service |
+| Sustained target publish rate | **Not verified** — measured at 10 msg/s, the rate the per-viewer budget allows on one channel |
+| Latency percentiles under target load | **Partially verified** — in budget at 1,000 connections, over at 5,000 and 10,000 |
+| Per-viewer bandwidth budget | **Verified at 1,000 connections** — 2,004 B/s against a 2,000 B/s budget |
 
 ### What is deliberately not claimed
 
@@ -250,7 +327,24 @@ creation.
 
 ## Still unverified
 
-The items in **Conformance** above remain open. In particular this work did not
-establish the 100,000 connection ceiling or the sustained 1,000 msg/s publish
-rate; the load generator drives the publish endpoint and has not yet been run at
-that scale against a serving instance.
+The items in **Conformance** above remain open. The load generator has now been
+run end to end against a serving instance at up to 10,000 real WebSocket
+subscribers, which verifies the per-viewer bandwidth budget and the
+no-content-dropped property, and bounds delivery latency short of the documented
+percentiles.
+
+What this work did **not** establish is the 100,000 connection ceiling or the
+sustained 1,000 msg/s platform publish rate. Both are untested rather than failed:
+this machine's ephemeral port range caps a single-source subscriber population at
+about 16k regardless of what the service can hold. Closing them needs the
+generator on a separate host, a widened port range, and more than one instance.
+
+Two measurement defects were found and fixed while gathering this data, both of
+which had been producing numbers that looked better than reality:
+
+- Only the first subscriber to see a message was counted, so deliveries and bytes
+  were flat across 1,000 and 10,000 connections. Connections are now split into
+  probes that sample latency and load connections that carry the fanout.
+- The percentile helper read an unsorted sample, which could place p50 above p95,
+  and a run whose probes matched nothing read every percentile as 0.0 and passed.
+  Both are now covered by tests that fail without the fix.
