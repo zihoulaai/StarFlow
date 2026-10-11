@@ -70,6 +70,18 @@ var alertRule = []AlertCondition{
 			return s.HeartbeatsLost > HeartbeatLossThreshold
 		},
 	},
+	{
+		Name:     "connection_failure_rate",
+		Scope:    "instance",
+		Severity: "warning",
+		Breached: func(s Snapshot) bool {
+			// The sample floor matters more here than for any other condition:
+			// one failed handshake out of one attempt is a 100% rate, and
+			// paging on that would train an operator to ignore the alert.
+			return s.ConnAttempts >= ConnFailureMinAttempts &&
+				s.ConnFailureRate > ConnFailureRateBudget
+		},
+	},
 }
 
 // Budgets, stated so the alert bounds and the documented targets cannot drift
@@ -85,6 +97,13 @@ const (
 	// HeartbeatLossThreshold is how many connections lost to liveness before it
 	// suggests a network problem rather than individual clients.
 	HeartbeatLossThreshold = 100
+	// ConnFailureRateBudget is the fraction of connection attempts that may
+	// fail before it looks abnormal rather than like the background rate of
+	// stale SDKs and misconfigured clients.
+	ConnFailureRateBudget = 0.10
+	// ConnFailureMinAttempts is the sample size below which the failure rate is
+	// not trusted. Without it a single failed attempt is a 100% rate.
+	ConnFailureMinAttempts = 20
 )
 
 // MatchRateAlert fires on a sensitive word match rate that spikes.
@@ -202,6 +221,17 @@ func describe(c AlertCondition, s Snapshot) string {
 		return fmt.Sprintf("%d subscribers stalled, threshold %d", s.SlowSubscribers, SlowSubscriberThreshold)
 	case "heartbeat_loss":
 		return fmt.Sprintf("%d connections lost to liveness, threshold %d", s.HeartbeatsLost, HeartbeatLossThreshold)
+	case "connection_failure_rate":
+		// The scope line names a tenant only when one holds the bulk of the
+		// failures. An operator reading "instance" knows to look at scanning
+		// or at clients pointed at the wrong gateway; reading a tenant name
+		// tells them whose credentials to rotate.
+		if s.FailingTenant != "" {
+			return fmt.Sprintf("%d of %d attempts failed (%.1f%%), concentrated on tenant %s",
+				s.ConnFailures, s.ConnAttempts, s.ConnFailureRate*100, s.FailingTenant)
+		}
+		return fmt.Sprintf("%d of %d attempts failed (%.1f%%), not concentrated on one tenant",
+			s.ConnFailures, s.ConnAttempts, s.ConnFailureRate*100)
 	default:
 		return c.Name
 	}

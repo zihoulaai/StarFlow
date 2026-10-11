@@ -90,6 +90,15 @@ func (e *Exporter) Render() string {
 	writeMetric(&b, "push_heartbeats_lost_total",
 		"Connections closed for failing liveness.", base,
 		[]Sample{{Value: float64(s.HeartbeatsLost)}})
+	writeMetric(&b, "push_connection_attempts_total",
+		"Subscriber handshakes attempted.", base,
+		[]Sample{{Value: float64(s.ConnAttempts)}})
+	writeMetric(&b, "push_connection_failures_total",
+		"Subscriber handshakes refused.", base,
+		[]Sample{{Value: float64(s.ConnFailures)}})
+	writeMetric(&b, "push_connection_failure_rate",
+		"Fraction of subscriber handshakes refused.", base,
+		[]Sample{{Value: s.ConnFailureRate}})
 
 	writeMetric(&b, "push_delivery_latency_ms",
 		"Publish-to-delivery latency, by quantile.", base,

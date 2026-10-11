@@ -281,6 +281,14 @@ func build(ctx context.Context, cfg *config.Config, material []byte) (*applicati
 	// --- probes ------------------------------------------------------------
 
 	exporter := observability.NewExporter(metrics, fmt.Sprint(cfg.Instance), nil)
+	monitor := observability.NewMonitor(observability.MonitorConfig{
+		Metrics:    metrics,
+		Evaluator:  observability.NewEvaluator(time.Now, time.Minute),
+		Rates:      matchCounters,
+		Sink:       observability.StderrSink(os.Stderr),
+		InstanceID: fmt.Sprint(cfg.Instance),
+		Now:        time.Now,
+	})
 	probe := readiness.New(
 		readiness.Check{Name: "control-plane", Probe: func(context.Context) error {
 			return db.PingContext(context.Background())
@@ -296,6 +304,7 @@ func build(ctx context.Context, cfg *config.Config, material []byte) (*applicati
 	bridge := transport.WriteBridge()
 	go fanout.RunFlush(ctx, cfg.Delivery.FlushInterval, bridge)
 	go lifecycle.Run(ctx, bridge)
+	go monitor.Run(ctx)
 
 	// Run returns immediately on an in-memory bus and blocks on Redis, so it
 	// must be a goroutine either way: treating its return as loop completion

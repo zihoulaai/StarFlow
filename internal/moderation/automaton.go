@@ -322,10 +322,30 @@ type Counters struct {
 	perTenant map[string]*tenantCounters
 }
 
+// baselineWindows is how many completed windows the baseline averages.
+//
+// A spike is a rise against recent traffic, so the baseline has to describe a
+// stretch of time rather than a single window: comparing this window to the one
+// before it fires on ordinary traffic that happens to straddle a boundary. Ten
+// minutes is long enough to describe a tenant's ordinary level and short enough
+// that a tenant whose content changes character is not compared against its old
+// shape for long.
+const baselineWindows = 10
+
+// window is one interval of counting.
+type window struct {
+	start     time.Time
+	matches   int64
+	publishes int64
+}
+
 type tenantCounters struct {
-	windowStart time.Time
-	matches     int64
-	publishes   int64
+	current window
+	// history holds the completed windows, oldest first, bounded by
+	// baselineWindows. The current window is not in here: a spike is this
+	// window measured against what came before it, so the two must stay
+	// separable.
+	history []window
 }
 
 // NewCounters returns an empty counter set.
@@ -340,17 +360,19 @@ func (c *Counters) Observe(tenantID string, matched bool, now time.Time) {
 
 	tc, ok := c.perTenant[tenantID]
 	if !ok {
-		tc = &tenantCounters{windowStart: now}
+		tc = &tenantCounters{current: window{start: now}}
 		c.perTenant[tenantID] = tc
 	}
-	if now.Sub(tc.windowStart) >= time.Minute {
-		tc.windowStart = now
-		tc.matches = 0
-		tc.publishes = 0
+	if now.Sub(tc.current.start) >= time.Minute {
+		tc.history = append(tc.history, tc.current)
+		if len(tc.history) > baselineWindows {
+			tc.history = tc.history[len(tc.history)-baselineWindows:]
+		}
+		tc.current = window{start: now}
 	}
-	tc.publishes++
+	tc.current.publishes++
 	if matched {
-		tc.matches++
+		tc.current.matches++
 	}
 }
 
@@ -359,10 +381,65 @@ func (c *Counters) MatchRate(tenantID string) float64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	tc, ok := c.perTenant[tenantID]
-	if !ok || tc.publishes == 0 {
+	if !ok || tc.current.publishes == 0 {
 		return 0
 	}
-	return float64(tc.matches) / float64(tc.publishes)
+	return float64(tc.current.matches) / float64(tc.current.publishes)
+}
+
+// Baseline returns a tenant's match rate across the windows preceding the
+// current one, or zero when there is no history to average.
+//
+// A tenant with no completed window yet has nothing to compare against, so this
+// reports zero rather than guessing. MatchRateAlert's absolute floor exists for
+// the same reason: a zero baseline must not make any non-zero rate a spike.
+func (c *Counters) Baseline(tenantID string) float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	tc, ok := c.perTenant[tenantID]
+	if !ok || len(tc.history) == 0 {
+		return 0
+	}
+	var matches, publishes int64
+	for _, w := range tc.history {
+		matches += w.matches
+		publishes += w.publishes
+	}
+	if publishes == 0 {
+		return 0
+	}
+	return float64(matches) / float64(publishes)
+}
+
+// Publishes returns how many messages the tenant published in the current
+// window, which is the sample size the alert judges its rate against.
+func (c *Counters) Publishes(tenantID string) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	tc, ok := c.perTenant[tenantID]
+	if !ok {
+		return 0
+	}
+	return uint64(tc.current.publishes)
+}
+
+// Tenants returns the tenants with counting state.
+//
+// The spike alert asks about every tenant rather than only tenants that have
+// recently matched, because a tenant whose rate is climbing has by definition
+// been matching a little while already.
+func (c *Counters) Tenants() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	out := make([]string, 0, len(c.perTenant))
+	for id := range c.perTenant {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // matchesPattern reports whether content contains pattern. A promotional

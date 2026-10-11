@@ -361,6 +361,105 @@ func TestMatchRateCounters(t *testing.T) {
 	}
 }
 
+// The spike alert compares the current window against recent traffic, so a
+// baseline that only survives one window cannot be computed at all. A window
+// that rolls over must leave its counts behind.
+func TestCountersBaselineSurvivesWindowRollover(t *testing.T) {
+	c := NewCounters()
+	start := time.UnixMilli(1_700_000_000_000)
+
+	// A steady 10% window, then roll into the next minute.
+	for i := 0; i < 100; i++ {
+		c.Observe("t1", i < 10, start)
+	}
+	c.Observe("t1", false, start.Add(time.Minute))
+
+	if got := c.Baseline("t1"); got < 0.09 || got > 0.11 {
+		t.Errorf("baseline after one rollover = %v, want about 0.10", got)
+	}
+	if got := c.MatchRate("t1"); got != 0 {
+		t.Errorf("current rate = %v, want 0 for a window with one clean publish", got)
+	}
+}
+
+// A tenant that has just appeared has nothing to compare against. Reporting zero
+// is what MatchRateAlert's absolute floor is for, so returning something else
+// here would make every new tenant spike on its first match.
+func TestCountersBaselineIsZeroWithoutHistory(t *testing.T) {
+	c := NewCounters()
+	now := time.UnixMilli(1_700_000_000_000)
+
+	if got := c.Baseline("never-seen"); got != 0 {
+		t.Errorf("baseline for an unknown tenant = %v, want 0", got)
+	}
+	for i := 0; i < 50; i++ {
+		c.Observe("t1", true, now)
+	}
+	if got := c.Baseline("t1"); got != 0 {
+		t.Errorf("baseline inside the first window = %v, want 0; there is no history yet", got)
+	}
+}
+
+// The baseline averages the preceding windows rather than the most recent one,
+// so a single bad window stops dominating it. Two 10% windows followed by two
+// 50% ones must not read as 50% baseline.
+func TestCountersBaselineAveragesPrecedingWindows(t *testing.T) {
+	c := NewCounters()
+	start := time.UnixMilli(1_700_000_000_000)
+
+	fill := func(minute int, matchedEvery int) {
+		at := start.Add(time.Duration(minute) * time.Minute)
+		for i := 0; i < 100; i++ {
+			c.Observe("t1", i%matchedEvery == 0, at)
+		}
+	}
+	fill(0, 10) // 10%
+	fill(1, 10) // 10%
+	fill(2, 2)  // 50%
+	fill(3, 2)  // 50%, completes the fourth window
+	c.Observe("t1", false, start.Add(4*time.Minute))
+
+	// Four completed windows: two at 10% and two at 50%, so 30% overall.
+	if got := c.Baseline("t1"); got < 0.29 || got > 0.31 {
+		t.Errorf("baseline = %v, want about 0.30 across the four preceding windows", got)
+	}
+}
+
+// The history is bounded, so a long-lived process does not accumulate one entry
+// per minute per tenant forever.
+func TestCountersHistoryIsBounded(t *testing.T) {
+	c := NewCounters()
+	start := time.UnixMilli(1_700_000_000_000)
+
+	for minute := 0; minute < baselineWindows*3; minute++ {
+		c.Observe("t1", true, start.Add(time.Duration(minute)*time.Minute))
+	}
+	tc := c.perTenant["t1"]
+	if len(tc.history) != baselineWindows {
+		t.Errorf("history holds %d windows, want at most %d", len(tc.history), baselineWindows)
+	}
+}
+
+// The spike alert asks about every tenant, so the set has to be enumerable.
+func TestCountersTenantsIsSortedAndComplete(t *testing.T) {
+	c := NewCounters()
+	now := time.UnixMilli(1_700_000_000_000)
+
+	for _, id := range []string{"t3", "t1", "t2"} {
+		c.Observe(id, false, now)
+	}
+	got := c.Tenants()
+	want := []string{"t1", "t2", "t3"}
+	if len(got) != len(want) {
+		t.Fatalf("Tenants() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Tenants()[%d] = %q, want %q; enumeration order decides nothing but must be stable", i, got[i], want[i])
+		}
+	}
+}
+
 func BenchmarkEvaluateCleanContent(b *testing.B) {
 	a := NewAutomaton()
 	var rules []controlplane.ModerationRule

@@ -31,6 +31,9 @@ that can drift.
 | `push_drop_rate` | gauge | ratio | `instance` | Fraction of offered content lost. |
 | `push_slow_subscribers` | gauge | connections | `instance` | Subscribers currently stalled. |
 | `push_heartbeats_lost_total` | counter | connections | `instance` | Connections closed for failing liveness. |
+| `push_connection_attempts_total` | counter | attempts | `instance` | Subscriber handshakes attempted, successful or not. The denominator for the failure rate. |
+| `push_connection_failures_total` | counter | attempts | `instance` | Subscriber handshakes refused. A failure the credential never resolved is counted here but against no tenant. |
+| `push_connection_failure_rate` | gauge | ratio | `instance` | Fraction of handshakes refused. Rises on a bad deploy, on scanning, or on a client pointed at the wrong gateway. |
 | `push_delivery_latency_ms` | gauge | ms | `instance`, `quantile` | Latency distribution, not an average. |
 | `push_tenant_connections_live` | gauge | connections | `instance`, `tenant` | Per-tenant connection use. |
 | `push_tenant_publishes_accepted_total` | counter | messages | `instance`, `tenant` | Per-tenant publish rate. |
@@ -71,6 +74,7 @@ acts on.
 | `drop_rate_high` | Lost content over 5% of offered | warning | Read the `cause` breakdown before acting. |
 | `slow_subscribers` | More than 10 stalled connections | warning | Client or network, not capacity. |
 | `heartbeat_loss` | More than 100 connections lost to liveness | warning | Network or an intermediary, not individual clients. |
+| `connection_failure_rate` | More than 10% of handshakes refused, over at least 20 attempts | warning | Read the scope: a named tenant is a credential or deploy problem on that tenant; instance-wide is scanning, or clients pointed at the wrong gateway. |
 
 The latency alert exists *because* the other signals disambiguate it. A latency
 breach with normal drop rates means add capacity; the same breach with a
@@ -80,6 +84,27 @@ for the second would be the wrong response.
 **A held alert does not re-fire.** A sustained breach produces one alert, not one
 per scrape. Clearing requires the condition to stay clear for a hysteresis window,
 so a metric sitting exactly on its bound does not flap.
+
+### Where alerts go
+
+Alerts are written to **stderr**, one line per alert, prefixed `gateway: alert`.
+There is no alerting back end: the line is the whole delivery mechanism, and a
+container log collector is the thing that turns it into a page.
+
+```
+alert connection_failure_rate severity=warning scope=tenant/t1 19 of 100 attempts failed (19.0%), concentrated on tenant t1
+```
+
+**Every alert names its scope**, because a page that cannot be placed is a page
+that has to be investigated before it can be acted on. Most conditions are
+instance-scoped and carry the instance id. Two are scoped to a tenant when one
+holds the bulk of the signal:
+
+- `connection_failure_rate` names a tenant when it accounts for at least two
+  thirds of the failures; otherwise it says the failures are not concentrated,
+  which points at scanning or a misconfigured client rather than at credentials.
+- `moderation_match_rate_spike` is per tenant throughout, since one tenant's
+  flood says nothing about another's.
 
 ### Moderation match-rate spike
 

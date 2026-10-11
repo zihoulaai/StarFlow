@@ -42,6 +42,13 @@ type Metrics struct {
 	slowSubscribers atomic.Int64
 	heartbeatsLost  atomic.Uint64
 
+	// Connection attempt outcomes. These are the denominator and numerator of
+	// the failure rate: a failure count alone cannot be read, because an
+	// instance refusing 5 of 5 attempts during a cold start and an instance
+	// refusing 5 of 100,000 are not the same event.
+	connAttempts atomic.Uint64
+	connFailures atomic.Uint64
+
 	// perTenant holds the counters that must be tenant-scoped. It is written
 	// under mu, and only on admission rather than per delivery, which is what
 	// keeps the lock off the fanout path.
@@ -59,6 +66,11 @@ type TenantCounters struct {
 	PublishesRefused  atomic.Uint64
 	DeliveriesOut     atomic.Uint64
 	BytesOut          atomic.Uint64
+	// ConnFailures counts handshakes this tenant's credentials failed. A
+	// failure the credential never resolved belongs to no tenant and is
+	// counted only in the platform total: attributing an unknown credential to
+	// whichever tenant asked would blame a tenant for someone else's traffic.
+	ConnFailures atomic.Uint64
 }
 
 // NewMetrics returns an empty metric set.
@@ -159,6 +171,28 @@ func (m *Metrics) ConnectionClosed(tenantID string) {
 	m.tenant(tenantID).ConnsLive.Add(-1)
 }
 
+// ObserveConnectionAttempt records a client that reached the subscriber
+// transport.
+//
+// It is counted before authentication so the failure rate has a denominator:
+// counting only successes would make the rate of failures unmeasurable, and
+// counting only failures would make it unreadable without knowing the traffic
+// it refused.
+func (m *Metrics) ObserveConnectionAttempt() { m.connAttempts.Add(1) }
+
+// ObserveConnectionFailure records a handshake that did not complete.
+//
+// tenantID is empty when the credential never resolved to one. That case is the
+// interesting one — an unknown app key is the signature of scanning or of a
+// client pointed at the wrong gateway — and attributing it to a tenant would
+// blame one tenant for traffic it had no part in.
+func (m *Metrics) ObserveConnectionFailure(tenantID string) {
+	m.connFailures.Add(1)
+	if tenantID != "" {
+		m.tenant(tenantID).ConnFailures.Add(1)
+	}
+}
+
 // SetSlowSubscribers publishes the current count.
 func (m *Metrics) SetSlowSubscribers(n int) { m.slowSubscribers.Store(int64(n)) }
 
@@ -197,6 +231,20 @@ type Snapshot struct {
 	SlowSubscribers int64
 	HeartbeatsLost  uint64
 
+	// ConnAttempts and ConnFailures are the connection handshake totals.
+	ConnAttempts uint64
+	ConnFailures uint64
+
+	// ConnFailureRate is ConnFailures over ConnAttempts, and zero when no
+	// attempt has been made.
+	ConnFailureRate float64
+	// FailingTenant is the tenant holding the largest share of the failures, and
+	// empty when failures are not concentrated in one. It is what makes the
+	// alert answerable: an instance-wide burst points at scanning or a
+	// misconfigured client, a single tenant's burst points at that tenant's
+	// credentials.
+	FailingTenant string
+
 	// Latency percentiles, in milliseconds.
 	LatencyP50Ms float64
 	LatencyP95Ms float64
@@ -226,9 +274,14 @@ func (m *Metrics) Snapshot() Snapshot {
 		DropsDegradation:  m.dropsDegradation.Load(),
 		SlowSubscribers:   m.slowSubscribers.Load(),
 		HeartbeatsLost:    m.heartbeatsLost.Load(),
+		ConnAttempts:      m.connAttempts.Load(),
+		ConnFailures:      m.connFailures.Load(),
 		LatencyP50Ms:      p50,
 		LatencyP95Ms:      p95,
 		LatencyP99Ms:      p99,
+	}
+	if s.ConnAttempts > 0 {
+		s.ConnFailureRate = float64(s.ConnFailures) / float64(s.ConnAttempts)
 	}
 	if s.PublishesAccepted > 0 {
 		s.FanoutFactor = float64(s.DeliveriesOut) / float64(s.PublishesAccepted)
@@ -240,8 +293,37 @@ func (m *Metrics) Snapshot() Snapshot {
 
 	m.mu.Lock()
 	s.TenantCount = len(m.perTenant)
+	s.FailingTenant = m.dominantFailingTenantLocked(s.ConnFailures)
 	m.mu.Unlock()
 	return s
+}
+
+// dominantFailingTenantLocked names the tenant holding the largest share of the
+// failures, or "" when no single tenant explains most of them.
+//
+// The share threshold is what separates the two incidents the spec asks the
+// alert to distinguish. A tenth of one tenant's failures is not "that tenant is
+// broken" — with many tenants a slow rotation through the map puts each of them
+// in that position — so the tenant is only named when it accounts for the bulk
+// of them. Callers hold m.mu.
+func (m *Metrics) dominantFailingTenantLocked(totalFailures uint64) string {
+	if totalFailures == 0 {
+		return ""
+	}
+	var top string
+	var topN uint64
+	for id, tc := range m.perTenant {
+		if n := tc.ConnFailures.Load(); n > topN {
+			top, topN = id, n
+		}
+	}
+	// Two thirds, so a pair of tenants failing comparably names neither: the
+	// cause is then shared rather than one tenant's, and saying so is more
+	// useful than picking whichever the map happened to yield first.
+	if top == "" || topN*3 < totalFailures*2 {
+		return ""
+	}
+	return top
 }
 
 // TenantSnapshot is a copyable view of one tenant's counters.
@@ -255,6 +337,8 @@ type TenantSnapshot struct {
 	PublishesRefused  uint64
 	DeliveriesOut     uint64
 	BytesOut          uint64
+	// ConnFailures is how many handshakes this tenant's credentials failed.
+	ConnFailures uint64
 }
 
 // TenantSnapshot returns one tenant's counters.
@@ -271,6 +355,7 @@ func (m *Metrics) TenantSnapshot(tenantID string) (TenantSnapshot, bool) {
 		PublishesRefused:  tc.PublishesRefused.Load(),
 		DeliveriesOut:     tc.DeliveriesOut.Load(),
 		BytesOut:          tc.BytesOut.Load(),
+		ConnFailures:      tc.ConnFailures.Load(),
 	}, true
 }
 

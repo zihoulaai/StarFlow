@@ -52,14 +52,31 @@ func (s *stubResolver) AuthenticateSecret(ctx context.Context, appKey, secret st
 }
 
 type countingMetrics struct {
-	mu     sync.Mutex
-	opened int
-	closed int
+	mu       sync.Mutex
+	opened   int
+	closed   int
+	attempts int
+	// failTenants records the tenant each reported failure was attributed to,
+	// so a test can assert that a failure the credential never resolved is not
+	// blamed on a tenant.
+	failTenants []string
 }
 
 func (c *countingMetrics) ConnectionOpened(string) { c.mu.Lock(); c.opened++; c.mu.Unlock() }
 func (c *countingMetrics) ConnectionClosed(string) { c.mu.Lock(); c.closed++; c.mu.Unlock() }
 func (c *countingMetrics) ObserveHeartbeatLost()   {}
+
+func (c *countingMetrics) ObserveConnectionAttempt() {
+	c.mu.Lock()
+	c.attempts++
+	c.mu.Unlock()
+}
+
+func (c *countingMetrics) ObserveConnectionFailure(tenantID string) {
+	c.mu.Lock()
+	c.failTenants = append(c.failTenants, tenantID)
+	c.mu.Unlock()
+}
 
 func newTestTransport(r authenticator, lim connLimiter) (*Transport, *Store, *Lifecycle, *countingMetrics) {
 	store := NewStore()
@@ -535,5 +552,95 @@ func TestConcurrentWritesAreSerialised(t *testing.T) {
 
 	if got != 100 {
 		t.Errorf("received %d messages, want 100", got)
+	}
+}
+
+// --- Connection attempt failure reporting ---
+
+// The failure rate alert reads these counters, so a handshake that is refused
+// without reporting leaves the rate reading as healthy while clients are being
+// turned away.
+func TestFailedHandshakesAreReported(t *testing.T) {
+	t.Run("an unresolved credential belongs to no tenant", func(t *testing.T) {
+		res := &stubResolver{err: auth.ErrCredentialUnknown}
+		tr, _, _, spy := newTestTransport(res, nil)
+
+		c := dialSub(t, tr)
+		sendJSON(t, c, map[string]any{"op": "hello", "token": "nope"})
+		if op := readJSON(t, c)["op"]; op != "error" {
+			t.Fatalf("op = %v, want error", op)
+		}
+
+		spy.mu.Lock()
+		defer spy.mu.Unlock()
+		if len(spy.failTenants) != 1 {
+			t.Fatalf("reported %d failures, want 1", len(spy.failTenants))
+		}
+		if spy.failTenants[0] != "" {
+			t.Errorf("failure attributed to tenant %q; an unresolved credential "+
+				"belongs to none", spy.failTenants[0])
+		}
+	})
+
+	t.Run("a failure after the tenant resolved is attributed to it", func(t *testing.T) {
+		// The credential resolves, so the tenant is known, but the privilege
+		// check then refuses it. That failure is t1's, and naming it is what
+		// makes a single tenant's bad rollout visible.
+		res := &stubResolver{identity: auth.Identity{
+			TenantID: "t1", AppKey: "ak", Subject: "u1",
+			Privileges: auth.Privileges(true, false),
+		}}
+		tr, _, _, spy := newTestTransport(res, nil)
+
+		c := dialSub(t, tr)
+		sendJSON(t, c, map[string]any{"op": "hello", "token": "good-token"})
+		if op := readJSON(t, c)["op"]; op != "error" {
+			t.Fatalf("op = %v, want error", op)
+		}
+
+		spy.mu.Lock()
+		defer spy.mu.Unlock()
+		if len(spy.failTenants) != 1 || spy.failTenants[0] != "t1" {
+			t.Errorf("failures attributed to %v, want exactly one to t1", spy.failTenants)
+		}
+	})
+
+	t.Run("a connection ceiling refusal is reported too", func(t *testing.T) {
+		res := &stubResolver{identity: subIdentity()}
+		tr, _, _, spy := newTestTransport(res, &fixedLimiter{allow: false})
+
+		c := dialSub(t, tr)
+		sendJSON(t, c, map[string]any{"op": "hello", "token": "good-token"})
+		_ = readJSON(t, c)
+
+		spy.mu.Lock()
+		defer spy.mu.Unlock()
+		if len(spy.failTenants) != 1 {
+			t.Errorf("reported %d failures, want the ceiling refusal counted", len(spy.failTenants))
+		}
+	})
+}
+
+// Every handshake is an attempt, not only the failing ones: the failure rate
+// needs failures as a fraction of something.
+func TestEveryHandshakeCountsAsAnAttempt(t *testing.T) {
+	res := &stubResolver{identity: subIdentity()}
+	tr, _, _, spy := newTestTransport(res, nil)
+
+	for i := 0; i < 3; i++ {
+		c := dialSub(t, tr)
+		sendJSON(t, c, map[string]any{"op": "hello", "token": "good-token"})
+		if op := readJSON(t, c)["op"]; op != "ready" {
+			t.Fatalf("attempt %d: op = %v, want ready", i, op)
+		}
+	}
+
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	if spy.attempts != 3 {
+		t.Errorf("attempts = %d, want 3", spy.attempts)
+	}
+	if len(spy.failTenants) != 0 {
+		t.Errorf("a successful handshake reported %v", spy.failTenants)
 	}
 }

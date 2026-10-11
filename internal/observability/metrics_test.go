@@ -663,3 +663,202 @@ func TestDocumentedLatencyBudgetMatchesTheAlert(t *testing.T) {
 		t.Error("the latency alert fired with no publishes admitted")
 	}
 }
+
+// --- Connection attempt failures ---
+
+// The counter is the whole point of the condition: without it a failure rate
+// cannot be computed, and an instance refusing every attempt looks identical to
+// an idle one.
+func TestConnectionFailureIsCounted(t *testing.T) {
+	m := NewMetrics(time.Now)
+
+	m.ObserveConnectionAttempt()
+	m.ObserveConnectionFailure("t1")
+
+	s := m.Snapshot()
+	if s.ConnAttempts != 1 {
+		t.Errorf("attempts = %d, want 1", s.ConnAttempts)
+	}
+	if s.ConnFailures != 1 {
+		t.Errorf("failures = %d, want 1", s.ConnFailures)
+	}
+	if s.ConnFailureRate != 1 {
+		t.Errorf("failure rate = %v, want 1", s.ConnFailureRate)
+	}
+}
+
+// A failed handshake is an attempt, so it belongs in the denominator too.
+func TestConnectionFailureRateCountsFailuresAgainstAttempts(t *testing.T) {
+	m := NewMetrics(time.Now)
+
+	for i := 0; i < 100; i++ {
+		m.ObserveConnectionAttempt()
+	}
+	for i := 0; i < 10; i++ {
+		m.ObserveConnectionFailure("t1")
+	}
+
+	s := m.Snapshot()
+	if got := s.ConnFailureRate; got < 0.099 || got > 0.101 {
+		t.Errorf("failure rate = %v, want about 0.10", got)
+	}
+}
+
+// An instance that has never been asked to connect has no rate, not a zero one
+// that reads as "nothing is failing" alongside a real measurement.
+func TestConnectionFailureRateIsZeroWithoutAttempts(t *testing.T) {
+	m := NewMetrics(time.Now)
+	m.ObserveConnectionFailure("t1")
+
+	if got := m.Snapshot().ConnFailureRate; got != 0 {
+		t.Errorf("failure rate with no attempts = %v, want 0", got)
+	}
+}
+
+// A credential that never resolved belongs to no tenant. Counting it against
+// one would blame that tenant for scanning traffic it had no part in, and the
+// alert would name the wrong scope.
+func TestUnresolvedConnectionFailureIsAttributedToNoTenant(t *testing.T) {
+	m := NewMetrics(time.Now)
+
+	m.ObserveConnectionAttempt()
+	m.ObserveConnectionFailure("")
+
+	s := m.Snapshot()
+	if s.ConnFailures != 1 {
+		t.Errorf("platform failures = %d, want the unattributed failure counted", s.ConnFailures)
+	}
+	if s.FailingTenant != "" {
+		t.Errorf("FailingTenant = %q, want empty when no tenant resolved", s.FailingTenant)
+	}
+	if got, ok := m.TenantSnapshot("t1"); ok && got.ConnFailures != 0 {
+		t.Errorf("tenant t1 recorded %d failures it was not party to", got.ConnFailures)
+	}
+}
+
+// One tenant failing everything is a different incident from failures spread
+// across the fleet, and the alert has to be able to say which.
+func TestDominantFailingTenantIsNamedWhenConcentrated(t *testing.T) {
+	m := NewMetrics(time.Now)
+
+	m.ObserveConnectionAttempt()
+	for i := 0; i < 9; i++ {
+		m.ObserveConnectionFailure("t1")
+	}
+	m.ObserveConnectionFailure("")
+
+	if got := m.Snapshot().FailingTenant; got != "t1" {
+		t.Errorf("FailingTenant = %q, want t1 when it holds 90%% of the failures", got)
+	}
+}
+
+// Failures spread evenly are an instance-wide problem, and naming one of the
+// tenants would send an operator to rotate a credential that is fine.
+func TestFailuresSpreadAcrossTenantsNameNone(t *testing.T) {
+	m := NewMetrics(time.Now)
+
+	m.ObserveConnectionAttempt()
+	for _, id := range []string{"t1", "t2", "t3"} {
+		m.ObserveConnectionFailure(id)
+	}
+
+	if got := m.Snapshot().FailingTenant; got != "" {
+		t.Errorf("FailingTenant = %q, want empty when the failures are shared", got)
+	}
+}
+
+func TestConnectionFailureAlertFiresAboveTheRate(t *testing.T) {
+	m := NewMetrics(time.Now)
+	for i := 0; i < 100; i++ {
+		m.ObserveConnectionAttempt()
+	}
+	for i := 0; i < 20; i++ {
+		m.ObserveConnectionFailure("t1")
+	}
+
+	alerts := NewEvaluator(time.Now, time.Minute).Evaluate(m.Snapshot())
+	var found bool
+	for _, a := range alerts {
+		if a.Condition.Name == "connection_failure_rate" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a 20%% failure rate over 100 attempts did not alert: %+v", alerts)
+	}
+}
+
+// One failed attempt is a 100% rate. Paging on it would train an operator to
+// ignore the alert, so the sample floor has to hold.
+func TestConnectionFailureAlertIgnoresTooFewAttempts(t *testing.T) {
+	m := NewMetrics(time.Now)
+	m.ObserveConnectionAttempt()
+	m.ObserveConnectionFailure("t1")
+
+	for _, a := range NewEvaluator(time.Now, time.Minute).Evaluate(m.Snapshot()) {
+		if a.Condition.Name == "connection_failure_rate" {
+			t.Error("the connection failure alert fired on a sample of one attempt")
+		}
+	}
+}
+
+func TestConnectionFailureAlertIgnoresARateUnderBudget(t *testing.T) {
+	m := NewMetrics(time.Now)
+	for i := 0; i < 200; i++ {
+		m.ObserveConnectionAttempt()
+	}
+	for i := 0; i < 10; i++ { // 5%, half the budget
+		m.ObserveConnectionFailure("t1")
+	}
+
+	for _, a := range NewEvaluator(time.Now, time.Minute).Evaluate(m.Snapshot()) {
+		if a.Condition.Name == "connection_failure_rate" {
+			t.Errorf("the alert fired at %v, under the %v budget", a.Value, ConnFailureRateBudget)
+		}
+	}
+}
+
+// The spec requires the alert to say whether it is instance-wide or scoped to a
+// tenant, and the text is what an operator reads first.
+func TestConnectionFailureAlertNamesItsScope(t *testing.T) {
+	alert := func(failures func(m *Metrics)) string {
+		m := NewMetrics(time.Now)
+		for i := 0; i < 100; i++ {
+			m.ObserveConnectionAttempt()
+		}
+		failures(m)
+		for _, a := range NewEvaluator(time.Now, time.Minute).Evaluate(m.Snapshot()) {
+			if a.Condition.Name == "connection_failure_rate" {
+				return a.Value
+			}
+		}
+		t.Fatal("the connection failure alert did not fire")
+		return ""
+	}
+
+	t.Run("a concentrated burst names the tenant", func(t *testing.T) {
+		got := alert(func(m *Metrics) {
+			for i := 0; i < 19; i++ {
+				m.ObserveConnectionFailure("t1")
+			}
+			m.ObserveConnectionFailure("")
+		})
+		if !strings.Contains(got, "tenant t1") {
+			t.Errorf("value = %q, want it to name tenant t1", got)
+		}
+	})
+
+	t.Run("a spread burst says so", func(t *testing.T) {
+		got := alert(func(m *Metrics) {
+			for i := 0; i < 10; i++ {
+				m.ObserveConnectionFailure("t1")
+			}
+			for i := 0; i < 10; i++ {
+				m.ObserveConnectionFailure("t2")
+			}
+		})
+		if !strings.Contains(got, "not concentrated") {
+			t.Errorf("value = %q, want it to say the failures are not one tenant's", got)
+		}
+	})
+}

@@ -42,13 +42,19 @@ type connLimiter interface {
 
 // metricsSink is the subset of the metrics registry the transport reports to.
 //
-// The registry has a much larger surface than the three events here, and the
+// The registry has a much larger surface than the events here, and the
 // transport is on the connection hot path, so naming what it needs keeps it from
 // depending on every metric the service collects.
 type metricsSink interface {
 	ConnectionOpened(tenantID string)
 	ConnectionClosed(tenantID string)
 	ObserveHeartbeatLost()
+	ObserveConnectionAttempt()
+	// ObserveConnectionFailure takes the tenant the credential resolved to, or
+	// "" when it never resolved to one. That distinction is the point: an
+	// unknown credential belongs to no tenant, and attributing it to whichever
+	// tenant was asked would blame one for another's traffic.
+	ObserveConnectionFailure(tenantID string)
 }
 
 // TransportConfig holds the subscriber transport's wiring.
@@ -209,13 +215,36 @@ type clientFrame struct {
 func (t *Transport) acceptHello(r *http.Request, ws *websocket.Conn) (*Conn, error) {
 	_ = ws.SetReadDeadline(t.cfg.Now().Add(t.cfg.HandshakeTimeout))
 
+	// Every exit from this function that is not the success below is a failed
+	// attempt, so the failure is recorded once here rather than at each of the
+	// five returns. A per-return call would be one more place to forget, and a
+	// forgotten report is a failure rate that silently reads as healthy.
+	if t.cfg.Metrics != nil {
+		t.cfg.Metrics.ObserveConnectionAttempt()
+	}
+	conn, tenantID, err := t.handshake(r, ws)
+	if err != nil {
+		if t.cfg.Metrics != nil {
+			t.cfg.Metrics.ObserveConnectionFailure(tenantID)
+		}
+		return nil, err
+	}
+	return conn, nil
+}
+
+// handshake authenticates a client and builds its connection.
+//
+// It returns the tenant the credential resolved to alongside the error, because
+// a failure that resolved a tenant is attributable and one that did not is not:
+// the caller needs both to report the failure against the right scope.
+func (t *Transport) handshake(r *http.Request, ws *websocket.Conn) (*Conn, string, error) {
 	_, data, err := ws.ReadMessage()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var f clientFrame
 	if err := json.Unmarshal(data, &f); err != nil || f.Op != "hello" {
-		return nil, errNotHello
+		return nil, "", errNotHello
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -223,13 +252,13 @@ func (t *Transport) acceptHello(r *http.Request, ws *websocket.Conn) (*Conn, err
 
 	id, err := t.resolve(ctx, f.AppKey, f.Token)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := auth.Check(id.Privileges, auth.PrivilegeSubscribe); err != nil {
-		return nil, err
+		return nil, id.TenantID, err
 	}
 	if t.cfg.Limiter != nil && !t.cfg.Limiter.AllowConnection(id.TenantID, t.cfg.Now()) {
-		return nil, errConnLimit
+		return nil, id.TenantID, errConnLimit
 	}
 
 	t.mu.Lock()
@@ -254,7 +283,7 @@ func (t *Transport) acceptHello(r *http.Request, ws *websocket.Conn) (*Conn, err
 	// waiting for a follow-up frame. That removes a round trip from every
 	// connection, including every reconnect.
 	t.subscribe(conn, f.Channels)
-	return conn, nil
+	return conn, id.TenantID, nil
 }
 
 // resolve authenticates a credential, trying the token form first.
