@@ -323,7 +323,7 @@ func TestTraceFollowsAMessageAcrossItsPath(t *testing.T) {
 	s.Record(Trace{MessageID: 42, TenantID: "t1", Channel: "room:1", Delivered: 0})
 	s.Record(Trace{MessageID: 42, TenantID: "t1", Channel: "room:1", Delivered: 10, Dropped: 2})
 
-	got, ok := s.Get(42)
+	got, ok := s.Trace(42)
 	if !ok {
 		t.Fatal("trace not found")
 	}
@@ -384,10 +384,10 @@ func TestTraceRetentionIsBounded(t *testing.T) {
 	if s.Len() != 10 {
 		t.Errorf("retained %d traces, want the configured bound of 10", s.Len())
 	}
-	if _, ok := s.Get(99); !ok {
+	if _, ok := s.Trace(99); !ok {
 		t.Error("the most recent trace was discarded")
 	}
-	if _, ok := s.Get(0); ok {
+	if _, ok := s.Trace(0); ok {
 		t.Error("the oldest trace survived; the bound is not being enforced")
 	}
 }

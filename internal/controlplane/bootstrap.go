@@ -45,7 +45,7 @@ func BootstrapStore(ctx context.Context, s *Store, b Bootstrap) error {
 			RoleAdmin, RoleViewer, b.Role)
 	}
 
-	tenant, err := s.GetTenant(ctx, b.TenantID)
+	tenant, err := s.Tenant(ctx, b.TenantID)
 	if errors.Is(err, ErrNotFound) {
 		tenant, err = s.CreateTenant(ctx, Tenant{ID: b.TenantID, Name: b.TenantID})
 	}

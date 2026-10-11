@@ -217,7 +217,7 @@ func build(ctx context.Context, cfg *config.Config, material []byte) (*applicati
 			return true
 		},
 		Policy: func(tenantID string) string {
-			return cache.Get(tenantID).Quota.PublishFailurePolicy
+			return cache.Tenant(tenantID).Quota.PublishFailurePolicy
 		},
 		Matcher:                 automaton,
 		DuplicateWindow:         func(tenantID string) time.Duration { return 5 * time.Second },
@@ -360,7 +360,7 @@ func loadTenants(ctx context.Context, store *controlplane.Store, cache *controlp
 // loadRules builds each tenant's moderation automaton.
 func loadRules(cache *controlplane.ConfigCache, m *moderation.Automaton) error {
 	for _, tenantID := range cache.Tenants() {
-		rules := cache.Get(tenantID).Rules
+		rules := cache.Tenant(tenantID).Rules
 		if err := m.Reload(tenantID, rules); err != nil {
 			return fmt.Errorf("load rules for %s: %w", tenantID, err)
 		}
@@ -372,7 +372,7 @@ func loadRules(cache *controlplane.ConfigCache, m *moderation.Automaton) error {
 func configureTenants(cache *controlplane.ConfigCache, l *auth.TenantLimiter) {
 	now := time.Now()
 	for _, tenantID := range cache.Tenants() {
-		q := cache.Get(tenantID).Quota
+		q := cache.Tenant(tenantID).Quota
 		l.Configure(tenantID, q.MaxConnections, q.MaxPublishQPS, now)
 	}
 }
@@ -381,7 +381,7 @@ func configureTenants(cache *controlplane.ConfigCache, l *auth.TenantLimiter) {
 // policy type, applying the ceiling formula the design settled on.
 func channelPolicies(cache *controlplane.ConfigCache, cfg *config.Config) func(string) map[string]gateway.ChannelPolicy {
 	return func(tenantID string) map[string]gateway.ChannelPolicy {
-		tc := cache.Get(tenantID)
+		tc := cache.Tenant(tenantID)
 		out := make(map[string]gateway.ChannelPolicy, len(tc.Channels))
 		for name, ch := range tc.Channels {
 			merge := cfg.Delivery.MergeRatio
@@ -407,7 +407,7 @@ func channelPolicies(cache *controlplane.ConfigCache, cfg *config.Config) func(s
 // channelCeiling returns the effective publish ceiling for a channel.
 func channelCeiling(cache *controlplane.ConfigCache, cfg *config.Config) func(string, string) float64 {
 	return func(tenantID, channel string) float64 {
-		tc := cache.Get(tenantID)
+		tc := cache.Tenant(tenantID)
 		p := gateway.ResolveChannelPolicy(tc, channel,
 			cfg.Delivery.PerViewerBytesPerSecond, config.DefaultMaxMessageBytes)
 		return p.PublishCeiling

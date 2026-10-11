@@ -25,7 +25,7 @@ func TestConfigCacheAppliesChangeWithoutRestart(t *testing.T) {
 	if err := cache.Reload(ctx, f.t1.ID); err != nil {
 		t.Fatalf("initial Reload: %v", err)
 	}
-	if got := cache.Get(f.t1.ID).Quota.MaxConnections; got != 10 {
+	if got := cache.Tenant(f.t1.ID).Quota.MaxConnections; got != 10 {
 		t.Fatalf("initial MaxConnections = %d, want 10", got)
 	}
 
@@ -40,7 +40,7 @@ func TestConfigCacheAppliesChangeWithoutRestart(t *testing.T) {
 	if err := cache.Reload(ctx, f.t1.ID); err != nil {
 		t.Fatalf("Reload after change: %v", err)
 	}
-	if got := cache.Get(f.t1.ID).Quota.MaxConnections; got != 99 {
+	if got := cache.Tenant(f.t1.ID).Quota.MaxConnections; got != 99 {
 		t.Errorf("MaxConnections = %d after reload, want 99", got)
 	}
 	if cache.ReloadCount() != before+1 {
@@ -65,7 +65,7 @@ func TestConfigSnapshotIsImmutableAcrossReload(t *testing.T) {
 		t.Fatalf("Reload: %v", err)
 	}
 
-	inFlight := cache.Get(f.t1.ID)
+	inFlight := cache.Tenant(f.t1.ID)
 
 	if _, err := f.store.UpsertQuota(ctx, Quota{
 		TenantID: f.t1.ID, MaxConnections: 77, MaxPublishQPS: 1, MaxChannels: 1,
@@ -79,14 +79,14 @@ func TestConfigSnapshotIsImmutableAcrossReload(t *testing.T) {
 	if inFlight.Quota.MaxConnections != 10 {
 		t.Errorf("in-flight snapshot changed to %d, want the value it read (10)", inFlight.Quota.MaxConnections)
 	}
-	if got := cache.Get(f.t1.ID).Quota.MaxConnections; got != 77 {
+	if got := cache.Tenant(f.t1.ID).Quota.MaxConnections; got != 77 {
 		t.Errorf("current snapshot = %d, want 77", got)
 	}
 }
 
 func TestConfigCacheUnknownTenantYieldsEmptySnapshot(t *testing.T) {
 	cache := NewConfigCache(NewStoreLoader(newFixture(t).store))
-	cfg := cache.Get("never-seen")
+	cfg := cache.Tenant("never-seen")
 	if cfg.TenantID != "never-seen" {
 		t.Errorf("TenantID = %q", cfg.TenantID)
 	}
@@ -149,7 +149,7 @@ func TestReloaderAppliesPublishedChange(t *testing.T) {
 		t.Fatalf("change was not applied within %v", bus.PropagationInterval)
 	}
 
-	if got := cache.Get(f.t1.ID).Quota.MaxConnections; got != 500 {
+	if got := cache.Tenant(f.t1.ID).Quota.MaxConnections; got != 500 {
 		t.Errorf("MaxConnections = %d after reload, want 500", got)
 	}
 
@@ -194,7 +194,7 @@ func TestReloaderSurvivesAFailedReload(t *testing.T) {
 	if err := shared.PublishChange(ctx, bus.ConfigChange{Kind: bus.ConfigQuotaChanged, TenantID: "t1"}); err != nil {
 		t.Fatalf("PublishChange: %v", err)
 	}
-	waitForCond(t, time.Second, func() bool { return !cache.Get("t1").LoadedAt.IsZero() })
+	waitForCond(t, time.Second, func() bool { return !cache.Tenant("t1").LoadedAt.IsZero() })
 
 	if reloader.Failures() != 1 {
 		t.Errorf("failures = %d, want 1", reloader.Failures())
@@ -234,7 +234,7 @@ func TestConfigSnapshotIsTenantScoped(t *testing.T) {
 	}
 
 	for _, tenant := range []Tenant{f.t1, f.t2} {
-		cfg := cache.Get(tenant.ID)
+		cfg := cache.Tenant(tenant.ID)
 		if len(cfg.Rules) != 1 {
 			t.Fatalf("tenant %s got %d rules, want 1", tenant.ID, len(cfg.Rules))
 		}

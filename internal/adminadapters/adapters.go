@@ -66,9 +66,9 @@ func (s *Store) ListTenants(ctx context.Context) ([]admin.TenantView, error) {
 	return out, nil
 }
 
-// GetTenant returns one tenant, or admin.ErrNotFound if there is no such row.
-func (s *Store) GetTenant(ctx context.Context, id string) (admin.TenantView, error) {
-	t, err := s.CP.GetTenant(ctx, id)
+// Tenant returns one tenant, or admin.ErrNotFound if there is no such row.
+func (s *Store) Tenant(ctx context.Context, id string) (admin.TenantView, error) {
+	t, err := s.CP.Tenant(ctx, id)
 	if err != nil {
 		return admin.TenantView{}, translate(err)
 	}
@@ -109,12 +109,12 @@ func (s *Store) ListApplications(ctx context.Context, tenantID string) ([]admin.
 	return out, nil
 }
 
-// GetApplication returns one credential, or admin.ErrNotFound.
+// Application returns one credential, or admin.ErrNotFound.
 //
 // The view never carries the secret digest, so an operator cannot read one back
 // out of the API even with full administrative authority.
-func (s *Store) GetApplication(ctx context.Context, tenantID, id string) (admin.AppView, error) {
-	a, err := s.CP.GetApplication(ctx, tenantID, id)
+func (s *Store) Application(ctx context.Context, tenantID, id string) (admin.AppView, error) {
+	a, err := s.CP.Application(ctx, tenantID, id)
 	if err != nil {
 		return admin.AppView{}, translate(err)
 	}
@@ -170,9 +170,9 @@ func (s *Store) RotateSecret(ctx context.Context, tenantID, id string) (admin.Ap
 	return appView(a), secret, nil
 }
 
-// GetQuota returns the tenant's ceilings, or admin.ErrNotFound.
-func (s *Store) GetQuota(ctx context.Context, tenantID string) (admin.QuotaView, error) {
-	q, err := s.CP.GetQuota(ctx, tenantID)
+// Quota returns the tenant's ceilings, or admin.ErrNotFound.
+func (s *Store) Quota(ctx context.Context, tenantID string) (admin.QuotaView, error) {
+	q, err := s.CP.Quota(ctx, tenantID)
 	if err != nil {
 		return admin.QuotaView{}, translate(err)
 	}
@@ -200,11 +200,11 @@ func (s *Store) SetQuota(ctx context.Context, tenantID string, v admin.QuotaView
 	return quotaView(q), nil
 }
 
-// GetChannel returns a channel's configured limits joined with its live
+// Channel returns a channel's configured limits joined with its live
 // subscriber count, which lives in this instance's data plane rather than in
 // the database and so is absent for every other instance.
-func (s *Store) GetChannel(ctx context.Context, tenantID, channel string) (admin.ChannelView, error) {
-	c, err := s.CP.GetChannelConfig(ctx, tenantID, channel)
+func (s *Store) Channel(ctx context.Context, tenantID, channel string) (admin.ChannelView, error) {
+	c, err := s.CP.ChannelConfig(ctx, tenantID, channel)
 	if err != nil {
 		return admin.ChannelView{}, translate(err)
 	}
@@ -311,7 +311,7 @@ func (a *Authorizer) RoleFor(ctx context.Context, tenantID, subject string) (adm
 	if tenantID == "" || subject == "" {
 		return "", nil
 	}
-	p, err := a.CP.GetAdminPrincipal(ctx, tenantID, subject)
+	p, err := a.CP.AdminPrincipal(ctx, tenantID, subject)
 	if errors.Is(err, controlplane.ErrNotFound) {
 		return "", nil
 	}

@@ -33,9 +33,9 @@ func TestBootstrapCreatesTheFirstAdministrator(t *testing.T) {
 		t.Fatalf("BootstrapStore: %v", err)
 	}
 
-	p, err := s.GetAdminPrincipal(ctx, "t1", "root")
+	p, err := s.AdminPrincipal(ctx, "t1", "root")
 	if err != nil {
-		t.Fatalf("GetAdminPrincipal: %v", err)
+		t.Fatalf("AdminPrincipal: %v", err)
 	}
 	if p.Role != RoleAdmin || !p.Enabled {
 		t.Errorf("principal = %+v, want an enabled admin", p)
@@ -77,7 +77,7 @@ func TestBootstrapRefusesAnUnknownRole(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unknown role was accepted")
 	}
-	if _, gerr := s.GetAdminPrincipal(ctx, "t1", "root"); !errors.Is(gerr, ErrNotFound) {
+	if _, gerr := s.AdminPrincipal(ctx, "t1", "root"); !errors.Is(gerr, ErrNotFound) {
 		t.Error("a principal was created despite the role being refused")
 	}
 }
@@ -112,9 +112,9 @@ func TestBootstrapViewerIsNotAnAdministrator(t *testing.T) {
 	if ok {
 		t.Error("a viewer bootstrap may administer")
 	}
-	p, err := s.GetAdminPrincipal(ctx, "t1", "watcher")
+	p, err := s.AdminPrincipal(ctx, "t1", "watcher")
 	if err != nil {
-		t.Fatalf("GetAdminPrincipal: %v", err)
+		t.Fatalf("AdminPrincipal: %v", err)
 	}
 	if p.Role != RoleViewer {
 		t.Errorf("role = %q, want viewer", p.Role)

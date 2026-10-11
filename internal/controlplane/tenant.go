@@ -40,8 +40,8 @@ func (s *Store) CreateTenant(ctx context.Context, t Tenant) (Tenant, error) {
 	return t, nil
 }
 
-// GetTenant returns a tenant by id.
-func (s *Store) GetTenant(ctx context.Context, id string) (Tenant, error) {
+// Tenant returns a tenant by id.
+func (s *Store) Tenant(ctx context.Context, id string) (Tenant, error) {
 	var t Tenant
 	var redact int
 	var createdMs int64
@@ -87,7 +87,7 @@ func (s *Store) ListTenants(ctx context.Context) ([]Tenant, error) {
 
 // UpdateTenant applies fn to a copy of the tenant and persists the result.
 func (s *Store) UpdateTenant(ctx context.Context, id string, fn func(*Tenant)) (Tenant, error) {
-	t, err := s.GetTenant(ctx, id)
+	t, err := s.Tenant(ctx, id)
 	if err != nil {
 		return Tenant{}, err
 	}
@@ -184,10 +184,10 @@ func NewSecret() (string, error) {
 	return hexEncode(b[:]), nil
 }
 
-// GetApplicationByAppKey resolves a credential. App keys are globally unique,
+// ApplicationByAppKey resolves a credential. App keys are globally unique,
 // so this lookup is deliberately not tenant-scoped: a client presents the key
 // and the tenant is discovered from it.
-func (s *Store) GetApplicationByAppKey(ctx context.Context, appKey string) (Application, error) {
+func (s *Store) ApplicationByAppKey(ctx context.Context, appKey string) (Application, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, tenant_id, name, app_key, secret_hash,
 		        COALESCE(secret_prev_hash, ''), secret_prev_valid_until_ms,
@@ -214,8 +214,8 @@ func (s *Store) GetApplicationByAppKey(ctx context.Context, appKey string) (Appl
 	return a, nil
 }
 
-// GetApplication returns an application scoped to its tenant.
-func (s *Store) GetApplication(ctx context.Context, tenantID, appID string) (Application, error) {
+// Application returns an application scoped to its tenant.
+func (s *Store) Application(ctx context.Context, tenantID, appID string) (Application, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, tenant_id, name, app_key, secret_hash,
 		        COALESCE(secret_prev_hash, ''), secret_prev_valid_until_ms,
@@ -276,7 +276,7 @@ func (s *Store) ListApplications(ctx context.Context, tenantID string) ([]Applic
 
 // UpdateApplication applies fn to a copy of the application and persists it.
 func (s *Store) UpdateApplication(ctx context.Context, tenantID, appID string, fn func(*Application)) (Application, error) {
-	a, err := s.GetApplication(ctx, tenantID, appID)
+	a, err := s.Application(ctx, tenantID, appID)
 	if err != nil {
 		return Application{}, err
 	}
@@ -300,7 +300,7 @@ func (s *Store) UpdateApplication(ctx context.Context, tenantID, appID string, f
 // rotated-out secret stops verifying at the instant rotation is recorded,
 // which is the default because a rotation is usually a response to a leak.
 func (s *Store) RotateApplicationSecret(ctx context.Context, tenantID, appID string, grace time.Duration) (Application, string, error) {
-	a, err := s.GetApplication(ctx, tenantID, appID)
+	a, err := s.Application(ctx, tenantID, appID)
 	if err != nil {
 		return Application{}, "", err
 	}

@@ -71,7 +71,7 @@ func (f *fakeStore) ListTenants(context.Context) ([]TenantView, error) {
 	return out, nil
 }
 
-func (f *fakeStore) GetTenant(_ context.Context, id string) (TenantView, error) {
+func (f *fakeStore) Tenant(_ context.Context, id string) (TenantView, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failReads != nil {
@@ -117,7 +117,7 @@ func (f *fakeStore) ListApplications(_ context.Context, tenantID string) ([]AppV
 	return out, nil
 }
 
-func (f *fakeStore) GetApplication(_ context.Context, tenantID, id string) (AppView, error) {
+func (f *fakeStore) Application(_ context.Context, tenantID, id string) (AppView, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failReads != nil {
@@ -167,7 +167,7 @@ func (f *fakeStore) RotateSecret(_ context.Context, tenantID, id string) (AppVie
 	return a, "secret-" + a.ID + "-v" + itoa(f.rotations[id]), nil
 }
 
-func (f *fakeStore) GetQuota(_ context.Context, tenantID string) (QuotaView, error) {
+func (f *fakeStore) Quota(_ context.Context, tenantID string) (QuotaView, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if q, ok := f.quotas[tenantID]; ok {
@@ -183,7 +183,7 @@ func (f *fakeStore) SetQuota(_ context.Context, tenantID string, q QuotaView) (Q
 	return q, nil
 }
 
-func (f *fakeStore) GetChannel(_ context.Context, tenantID, channel string) (ChannelView, error) {
+func (f *fakeStore) Channel(_ context.Context, tenantID, channel string) (ChannelView, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	key := tenantID + "/" + channel

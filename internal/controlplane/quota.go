@@ -11,7 +11,7 @@ import (
 // UpsertQuota writes a tenant's ceilings.
 //
 // The content filters default to enabled, matching what a tenant with no
-// recorded quota is treated as having in GetQuota. Without this, a quota
+// recorded quota is treated as having in Quota. Without this, a quota
 // written from a struct literal would silently switch both filters off.
 func (s *Store) UpsertQuota(ctx context.Context, q Quota) (Quota, error) {
 	if q.TenantID == "" {
@@ -56,9 +56,9 @@ func (s *Store) UpsertQuota(ctx context.Context, q Quota) (Quota, error) {
 	return q, nil
 }
 
-// GetQuota returns a tenant's ceilings. A tenant with no row gets defaults
+// Quota returns a tenant's ceilings. A tenant with no row gets defaults
 // rather than an error, so a tenant is never left without a limit.
-func (s *Store) GetQuota(ctx context.Context, tenantID string) (Quota, error) {
+func (s *Store) Quota(ctx context.Context, tenantID string) (Quota, error) {
 	var q Quota
 	var dupEnabled, promoEnabled int
 	var updatedMs int64
@@ -125,10 +125,10 @@ func (s *Store) UpsertChannelConfig(ctx context.Context, c ChannelConfig) (Chann
 	return c, nil
 }
 
-// GetChannelConfig returns a channel's overrides. A channel with no row is not
+// ChannelConfig returns a channel's overrides. A channel with no row is not
 // an error: channels are created implicitly on first use, so the absence of a
 // row is the normal state and yields all-derived configuration.
-func (s *Store) GetChannelConfig(ctx context.Context, tenantID, channel string) (ChannelConfig, error) {
+func (s *Store) ChannelConfig(ctx context.Context, tenantID, channel string) (ChannelConfig, error) {
 	var c ChannelConfig
 	var ceiling, rate sql.NullFloat64
 	var merge sql.NullInt64

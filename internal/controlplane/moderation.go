@@ -352,8 +352,8 @@ func (s *Store) adminPrincipalExists(ctx context.Context, tenantID, subject stri
 	return id, true, nil
 }
 
-// GetAdminPrincipal resolves a caller within a tenant.
-func (s *Store) GetAdminPrincipal(ctx context.Context, tenantID, subject string) (AdminPrincipal, error) {
+// AdminPrincipal resolves a caller within a tenant.
+func (s *Store) AdminPrincipal(ctx context.Context, tenantID, subject string) (AdminPrincipal, error) {
 	var p AdminPrincipal
 	var enabled int
 	var createdMs int64
@@ -375,7 +375,7 @@ func (s *Store) GetAdminPrincipal(ctx context.Context, tenantID, subject string)
 // MayAdminister reports whether the principal may perform mutating
 // administrative operations.
 func (s *Store) MayAdminister(ctx context.Context, tenantID, subject string) (bool, error) {
-	p, err := s.GetAdminPrincipal(ctx, tenantID, subject)
+	p, err := s.AdminPrincipal(ctx, tenantID, subject)
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}

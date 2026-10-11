@@ -50,7 +50,7 @@ func NewStoreLoader(store *Store) StoreLoader { return StoreLoader{store: store}
 func (l StoreLoader) Load(ctx context.Context, tenantID string) (TenantConfig, error) {
 	s := l.store
 
-	quota, err := s.GetQuota(ctx, tenantID)
+	quota, err := s.Quota(ctx, tenantID)
 	if err != nil {
 		return TenantConfig{}, err
 	}
@@ -111,11 +111,11 @@ func NewConfigCache(loader Loader) *ConfigCache {
 	return &ConfigCache{loader: loader, byName: map[string]*TenantConfig{}}
 }
 
-// Get returns the current snapshot for a tenant.
+// Tenant returns the current snapshot for a tenant.
 //
 // A tenant that has never been loaded gets an empty snapshot rather than an
 // error: refusing to serve is the control plane's decision, not the cache's.
-func (c *ConfigCache) Get(tenantID string) TenantConfig {
+func (c *ConfigCache) Tenant(tenantID string) TenantConfig {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if cfg, ok := c.byName[tenantID]; ok {

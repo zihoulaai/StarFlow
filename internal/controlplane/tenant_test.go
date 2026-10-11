@@ -57,14 +57,14 @@ func TestTenantRoundTrip(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 
-	got, err := f.store.GetTenant(ctx, f.t1.ID)
+	got, err := f.store.Tenant(ctx, f.t1.ID)
 	if err != nil {
-		t.Fatalf("GetTenant: %v", err)
+		t.Fatalf("Tenant: %v", err)
 	}
 	if got.Name != f.t1.Name {
 		t.Errorf("name = %q, want %q", got.Name, f.t1.Name)
 	}
-	if _, err := f.store.GetTenant(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := f.store.Tenant(ctx, "missing"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 
@@ -97,9 +97,9 @@ func TestCreateApplicationReturnsSecretOnceAndStoresOnlyDigest(t *testing.T) {
 		t.Error("AppKey was not generated")
 	}
 
-	stored, err := f.store.GetApplication(ctx, f.t1.ID, app.ID)
+	stored, err := f.store.Application(ctx, f.t1.ID, app.ID)
 	if err != nil {
-		t.Fatalf("GetApplication: %v", err)
+		t.Fatalf("Application: %v", err)
 	}
 	if stored.SecretHash == "the-secret" {
 		t.Fatal("the plaintext secret was persisted")
@@ -111,19 +111,19 @@ func TestCreateApplicationReturnsSecretOnceAndStoresOnlyDigest(t *testing.T) {
 
 // App keys are globally unique by design, so this lookup is the one read path
 // that is not tenant-filtered. It must resolve the tenant, not just the key.
-func TestGetApplicationByAppKeyResolvesTenant(t *testing.T) {
+func TestApplicationByAppKeyResolvesTenant(t *testing.T) {
 	f := newFixture(t)
 	app := f.seedApplication(t, f.t2, "Other")
 
-	got, err := f.store.GetApplicationByAppKey(context.Background(), app.AppKey)
+	got, err := f.store.ApplicationByAppKey(context.Background(), app.AppKey)
 	if err != nil {
-		t.Fatalf("GetApplicationByAppKey: %v", err)
+		t.Fatalf("ApplicationByAppKey: %v", err)
 	}
 	if got.TenantID != f.t2.ID {
 		t.Errorf("tenant = %q, want %q", got.TenantID, f.t2.ID)
 	}
 
-	if _, err := f.store.GetApplicationByAppKey(context.Background(), "ak_unknown"); !errors.Is(err, ErrNotFound) {
+	if _, err := f.store.ApplicationByAppKey(context.Background(), "ak_unknown"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
@@ -179,8 +179,8 @@ func TestTenantScopedReadsNeverCrossTenantBoundary(t *testing.T) {
 		t.Fatalf("AppendAudit: %v", err)
 	}
 
-	t.Run("GetApplication", func(t *testing.T) {
-		if _, err := f.store.GetApplication(ctx, other, app.ID); !errors.Is(err, ErrNotFound) {
+	t.Run("Application", func(t *testing.T) {
+		if _, err := f.store.Application(ctx, other, app.ID); !errors.Is(err, ErrNotFound) {
 			t.Errorf("err = %v, want ErrNotFound", err)
 		}
 	})
@@ -195,20 +195,20 @@ func TestTenantScopedReadsNeverCrossTenantBoundary(t *testing.T) {
 		}
 	})
 
-	t.Run("GetQuota", func(t *testing.T) {
-		q, err := f.store.GetQuota(ctx, other)
+	t.Run("Quota", func(t *testing.T) {
+		q, err := f.store.Quota(ctx, other)
 		if err != nil {
-			t.Fatalf("GetQuota: %v", err)
+			t.Fatalf("Quota: %v", err)
 		}
 		if q.MaxConnections == 111 || q.MaxPublishQPS == 222 || q.MaxChannels == 333 {
 			t.Errorf("other tenant sees t1's quota: %+v", q)
 		}
 	})
 
-	t.Run("GetChannelConfig", func(t *testing.T) {
-		c, err := f.store.GetChannelConfig(ctx, other, "room:1")
+	t.Run("ChannelConfig", func(t *testing.T) {
+		c, err := f.store.ChannelConfig(ctx, other, "room:1")
 		if err != nil {
-			t.Fatalf("GetChannelConfig: %v", err)
+			t.Fatalf("ChannelConfig: %v", err)
 		}
 		if c.PublishCeilingOverrideQPS != nil {
 			t.Errorf("other tenant sees t1's channel override: %+v", c.PublishCeilingOverrideQPS)
@@ -265,8 +265,8 @@ func TestTenantScopedReadsNeverCrossTenantBoundary(t *testing.T) {
 		}
 	})
 
-	t.Run("GetAdminPrincipal", func(t *testing.T) {
-		if _, err := f.store.GetAdminPrincipal(ctx, other, principal.Subject); !errors.Is(err, ErrNotFound) {
+	t.Run("AdminPrincipal", func(t *testing.T) {
+		if _, err := f.store.AdminPrincipal(ctx, other, principal.Subject); !errors.Is(err, ErrNotFound) {
 			t.Errorf("err = %v, want ErrNotFound", err)
 		}
 	})
@@ -318,7 +318,7 @@ func TestTenantScopedReadsNeverCrossTenantBoundary(t *testing.T) {
 		if err != nil || len(rules) != 1 {
 			t.Errorf("owner's rules after cross-tenant deletes = %d (err %v), want 1", len(rules), err)
 		}
-		cfg, err := f.store.GetChannelConfig(ctx, f.t1.ID, "room:1")
+		cfg, err := f.store.ChannelConfig(ctx, f.t1.ID, "room:1")
 		if err != nil || cfg.PublishCeilingOverrideQPS == nil {
 			t.Errorf("owner's channel config was removed by a cross-tenant delete (err %v)", err)
 		}
@@ -340,9 +340,9 @@ func TestQuotaUpsertOverwrites(t *testing.T) {
 		t.Fatalf("second UpsertQuota: %v", err)
 	}
 
-	q, err := f.store.GetQuota(ctx, f.t1.ID)
+	q, err := f.store.Quota(ctx, f.t1.ID)
 	if err != nil {
-		t.Fatalf("GetQuota: %v", err)
+		t.Fatalf("Quota: %v", err)
 	}
 	if q.MaxConnections != 100 || q.MaxPublishQPS != 200 || q.MaxChannels != 300 {
 		t.Errorf("quota = %+v, want the second write", q)
@@ -355,9 +355,9 @@ func TestChannelConfigRoundTripsAbsentOverrides(t *testing.T) {
 
 	// A channel with no stored config is the normal case, not an error, and
 	// must come back with coalescing on and no override anywhere.
-	c, err := f.store.GetChannelConfig(ctx, f.t1.ID, "room:never-configured")
+	c, err := f.store.ChannelConfig(ctx, f.t1.ID, "room:never-configured")
 	if err != nil {
-		t.Fatalf("GetChannelConfig: %v", err)
+		t.Fatalf("ChannelConfig: %v", err)
 	}
 	if c.PublishCeilingOverrideQPS != nil || c.ReceiveRateTarget != nil || c.MergeRatioOverride != nil {
 		t.Errorf("absent overrides should stay nil, got %+v", c)
@@ -373,9 +373,9 @@ func TestChannelConfigRoundTripsAbsentOverrides(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertChannelConfig: %v", err)
 	}
-	got, err := f.store.GetChannelConfig(ctx, f.t1.ID, "room:2")
+	got, err := f.store.ChannelConfig(ctx, f.t1.ID, "room:2")
 	if err != nil {
-		t.Fatalf("GetChannelConfig: %v", err)
+		t.Fatalf("ChannelConfig: %v", err)
 	}
 	if got.CoalescingEnabled {
 		t.Error("coalescing override was not persisted")
@@ -397,9 +397,9 @@ func TestDeleteChannelConfigRestoresDerived(t *testing.T) {
 	if err := f.store.DeleteChannelConfig(ctx, f.t1.ID, "room:3"); err != nil {
 		t.Fatalf("DeleteChannelConfig: %v", err)
 	}
-	got, err := f.store.GetChannelConfig(ctx, f.t1.ID, "room:3")
+	got, err := f.store.ChannelConfig(ctx, f.t1.ID, "room:3")
 	if err != nil {
-		t.Fatalf("GetChannelConfig: %v", err)
+		t.Fatalf("ChannelConfig: %v", err)
 	}
 	if got.ReceiveRateTarget != nil {
 		t.Errorf("override survived deletion: %v", *got.ReceiveRateTarget)

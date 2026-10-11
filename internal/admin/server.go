@@ -92,7 +92,7 @@ type Action struct {
 // satisfy all four, and a caller may supply them separately.
 type TenantStore interface {
 	ListTenants(ctx context.Context) ([]TenantView, error)
-	GetTenant(ctx context.Context, id string) (TenantView, error)
+	Tenant(ctx context.Context, id string) (TenantView, error)
 	CreateTenant(ctx context.Context, name string) (TenantView, error)
 	UpdateTenant(ctx context.Context, id, name string) (TenantView, error)
 }
@@ -100,7 +100,7 @@ type TenantStore interface {
 // ApplicationStore is the administrative data access for credentials.
 type ApplicationStore interface {
 	ListApplications(ctx context.Context, tenantID string) ([]AppView, error)
-	GetApplication(ctx context.Context, tenantID, id string) (AppView, error)
+	Application(ctx context.Context, tenantID, id string) (AppView, error)
 	CreateApplication(ctx context.Context, tenantID, name string, canPublish, canSubscribe bool) (AppView, string, error)
 	SetApplicationEnabled(ctx context.Context, tenantID, id string, enabled bool) (AppView, error)
 	RotateSecret(ctx context.Context, tenantID, id string) (AppView, string, error)
@@ -108,13 +108,13 @@ type ApplicationStore interface {
 
 // QuotaStore is the administrative data access for a tenant's ceilings.
 type QuotaStore interface {
-	GetQuota(ctx context.Context, tenantID string) (QuotaView, error)
+	Quota(ctx context.Context, tenantID string) (QuotaView, error)
 	SetQuota(ctx context.Context, tenantID string, q QuotaView) (QuotaView, error)
 }
 
 // ChannelStore is the administrative data access for channel limits.
 type ChannelStore interface {
-	GetChannel(ctx context.Context, tenantID, channel string) (ChannelView, error)
+	Channel(ctx context.Context, tenantID, channel string) (ChannelView, error)
 	SetChannelLimit(ctx context.Context, tenantID, channel string, maxSubscribers int, ceiling float64, hasCeiling bool) (ChannelView, error)
 }
 
@@ -348,7 +348,7 @@ func (s *Server) handleTenantByID(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		tenant, err := s.tenants.GetTenant(ctx, id)
+		tenant, err := s.tenants.Tenant(ctx, id)
 		if err != nil {
 			writeLookupError(w, err, "tenant")
 			return
@@ -441,7 +441,7 @@ func (s *Server) handleApplicationByID(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		app, err := s.applications.GetApplication(ctx, tenantID, id)
+		app, err := s.applications.Application(ctx, tenantID, id)
 		if err != nil {
 			writeLookupError(w, err, "application")
 			return
@@ -508,7 +508,7 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		q, err := s.quotas.GetQuota(ctx, tenantID)
+		q, err := s.quotas.Quota(ctx, tenantID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not read quota")
 			return
@@ -557,7 +557,7 @@ func (s *Server) handleChannel(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		view, err := s.channels.GetChannel(ctx, tenantID, channel)
+		view, err := s.channels.Channel(ctx, tenantID, channel)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not read channel")
 			return

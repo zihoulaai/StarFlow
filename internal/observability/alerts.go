@@ -300,8 +300,8 @@ func (s *TraceStore) Record(t Trace) {
 	s.seen[t.MessageID] = len(s.traces) - 1
 }
 
-// Get returns a trace by message id.
-func (s *TraceStore) Get(id uint64) (Trace, bool) {
+// Trace returns a trace by message id.
+func (s *TraceStore) Trace(id uint64) (Trace, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	idx, ok := s.seen[id]

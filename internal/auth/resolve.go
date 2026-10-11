@@ -81,7 +81,7 @@ func (r *Resolver) Authenticate(ctx context.Context, token string) (Identity, er
 		return Identity{}, err
 	}
 
-	cfg := r.cache.Get(app.TenantID)
+	cfg := r.cache.Tenant(app.TenantID)
 	return Identity{
 		TenantID:     app.TenantID,
 		AppKey:       app.AppKey,
@@ -113,7 +113,7 @@ func (r *Resolver) AuthenticateSecret(ctx context.Context, appKey, secret string
 		return Identity{}, err
 	}
 
-	cfg := r.cache.Get(app.TenantID)
+	cfg := r.cache.Tenant(app.TenantID)
 	return Identity{
 		TenantID:     app.TenantID,
 		AppKey:       app.AppKey,
