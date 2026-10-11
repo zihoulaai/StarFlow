@@ -418,18 +418,20 @@ func TestEveryMutationIsAttributed(t *testing.T) {
 	f := newAdminFixture(t)
 
 	cases := []struct {
-		method, path, subject string
-		body                  any
-		operation             string
+		method    string
+		path      string
+		subject   string
+		body      any
+		operation string
 	}{
-		{http.MethodPost, "/admin/applications", "admin@example.com",
-			map[string]any{"name": "app"}, "application.create"},
-		{http.MethodPut, "/admin/quotas/", "admin@example.com",
-			QuotaView{MaxConnections: 10}, "quota.set"},
-		{http.MethodPatch, "/admin/channels/?channel=room:1", "admin@example.com",
-			map[string]any{"max_subscribers": 5}, "channel.set_limits"},
-		{http.MethodPut, "/admin/degradation", "admin@example.com",
-			map[string]any{"manual": true, "level": 2}, "degradation.set"},
+		{method: http.MethodPost, path: "/admin/applications", subject: "admin@example.com",
+			body: map[string]any{"name": "app"}, operation: "application.create"},
+		{method: http.MethodPut, path: "/admin/quotas/", subject: "admin@example.com",
+			body: QuotaView{MaxConnections: 10}, operation: "quota.set"},
+		{method: http.MethodPatch, path: "/admin/channels/?channel=room:1", subject: "admin@example.com",
+			body: map[string]any{"max_subscribers": 5}, operation: "channel.set_limits"},
+		{method: http.MethodPut, path: "/admin/degradation", subject: "admin@example.com",
+			body: map[string]any{"manual": true, "level": 2}, operation: "degradation.set"},
 	}
 
 	for _, c := range cases {

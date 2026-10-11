@@ -18,10 +18,10 @@ func TestAppendAuditRecordsEachDecision(t *testing.T) {
 		ruleID    string
 		decision  string
 	}{
-		{"room:1", "m-100", "rule-a", "blocked"},
-		{"room:1", "m-101", "rule-a", "blocked"},
-		{"room:2", "m-102", "rule-b", "tagged"},
-		{"room:2", "m-103", "", "muted"},
+		{channel: "room:1", messageID: "m-100", ruleID: "rule-a", decision: "blocked"},
+		{channel: "room:1", messageID: "m-101", ruleID: "rule-a", decision: "blocked"},
+		{channel: "room:2", messageID: "m-102", ruleID: "rule-b", decision: "tagged"},
+		{channel: "room:2", messageID: "m-103", ruleID: "", decision: "muted"},
 	}
 
 	for i, d := range decisions {
@@ -32,7 +32,7 @@ func TestAppendAuditRecordsEachDecision(t *testing.T) {
 			Body: RedactBody(f.t1, "original text"),
 		})
 		if err != nil {
-			t.Fatalf("AppendAudit %d: %v", i, err)
+			t.Errorf("AppendAudit %d: %v", i, err)
 		}
 	}
 

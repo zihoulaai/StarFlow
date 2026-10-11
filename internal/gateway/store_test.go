@@ -182,7 +182,7 @@ func TestUnsubscribeLeavesNoHoles(t *testing.T) {
 	seen := map[*Conn]bool{}
 	for _, sub := range subs {
 		if seen[sub.Conn()] {
-			t.Fatalf("connection %d appears twice after removal", sub.Conn().ID)
+			t.Errorf("connection %d appears twice after removal", sub.Conn().ID)
 		}
 		seen[sub.Conn()] = true
 	}

@@ -187,7 +187,7 @@ func TestIDGenProducesUniqueMonotonicIDs(t *testing.T) {
 	for i := 0; i < n; i++ {
 		id := g.Next()
 		if i > 0 && id <= prev {
-			t.Fatalf("id %d at index %d is not greater than previous %d", id, i, prev)
+			t.Errorf("id %d at index %d is not greater than previous %d", id, i, prev)
 		}
 		prev = id
 	}

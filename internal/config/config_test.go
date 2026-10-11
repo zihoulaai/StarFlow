@@ -63,14 +63,14 @@ func TestLoadDefaults(t *testing.T) {
 		got  any
 		want any
 	}{
-		{"FlushInterval", cfg.Delivery.FlushInterval, 10 * time.Millisecond},
-		{"WriteBufferBytes", cfg.Delivery.WriteBufferBytes, 16 * 1024},
-		{"ReadBufferBytes", cfg.Delivery.ReadBufferBytes, 4 * 1024},
-		{"MergeRatio", cfg.Delivery.MergeRatio, 20},
-		{"PerViewerBytesPerSecond", cfg.Delivery.PerViewerBytesPerSecond, DefaultPerViewerBytesPerSecond},
-		{"Shards", cfg.Delivery.Shards, 1024},
-		{"GOGC", cfg.Runtime.GOGC, 400},
-		{"SecretSource", cfg.ControlPlane.SecretSource, "env"},
+		{name: "FlushInterval", got: cfg.Delivery.FlushInterval, want: 10 * time.Millisecond},
+		{name: "WriteBufferBytes", got: cfg.Delivery.WriteBufferBytes, want: 16 * 1024},
+		{name: "ReadBufferBytes", got: cfg.Delivery.ReadBufferBytes, want: 4 * 1024},
+		{name: "MergeRatio", got: cfg.Delivery.MergeRatio, want: 20},
+		{name: "PerViewerBytesPerSecond", got: cfg.Delivery.PerViewerBytesPerSecond, want: DefaultPerViewerBytesPerSecond},
+		{name: "Shards", got: cfg.Delivery.Shards, want: 1024},
+		{name: "GOGC", got: cfg.Runtime.GOGC, want: 400},
+		{name: "SecretSource", got: cfg.ControlPlane.SecretSource, want: "env"},
 	}
 	for _, c := range checks {
 		if c.got != c.want {

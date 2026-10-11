@@ -321,14 +321,14 @@ func TestOriginPolicy(t *testing.T) {
 		origin string
 		want   bool
 	}{
-		{"exact match", "https://watch.example.com", true},
-		{"second entry", "http://localhost:3000", true},
-		{"trailing slash", "https://watch.example.com/", true},
-		{"uppercase host", "https://WATCH.EXAMPLE.COM", true},
-		{"unlisted origin", "https://evil.example.com", false},
-		{"subdomain of an allowed host", "https://sub.watch.example.com", false},
-		{"lookalike host", "https://watch.example.com.evil.test", false},
-		{"absent origin is non-browser", "", true},
+		{name: "exact match", origin: "https://watch.example.com", want: true},
+		{name: "second entry", origin: "http://localhost:3000", want: true},
+		{name: "trailing slash", origin: "https://watch.example.com/", want: true},
+		{name: "uppercase host", origin: "https://WATCH.EXAMPLE.COM", want: true},
+		{name: "unlisted origin", origin: "https://evil.example.com", want: false},
+		{name: "subdomain of an allowed host", origin: "https://sub.watch.example.com", want: false},
+		{name: "lookalike host", origin: "https://watch.example.com.evil.test", want: false},
+		{name: "absent origin is non-browser", origin: "", want: true},
 	}
 
 	for _, c := range cases {

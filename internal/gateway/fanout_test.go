@@ -348,7 +348,7 @@ func TestFanoutSerializesOncePerMessage(t *testing.T) {
 		}
 		for j := range reference {
 			if raw[0][j] != reference[j] {
-				t.Fatalf("subscriber %d received different bytes at offset %d", i, j)
+				t.Errorf("subscriber %d received different bytes at offset %d", i, j)
 			}
 		}
 	}

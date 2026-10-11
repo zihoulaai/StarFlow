@@ -370,9 +370,9 @@ func TestEveryAuthenticationRejectionIsAudited(t *testing.T) {
 		name  string
 		token string
 	}{
-		{"malformed", "garbage"},
-		{"bad signature", "v1.aaaa~bbbb~cccc~0~0.zzzz"},
-		{"unknown key", mustIssue(t, f.signer, "ak_unknown", "u", f.tenantA.ID)},
+		{name: "malformed", token: "garbage"},
+		{name: "bad signature", token: "v1.aaaa~bbbb~cccc~0~0.zzzz"},
+		{name: "unknown key", token: mustIssue(t, f.signer, "ak_unknown", "u", f.tenantA.ID)},
 	}
 	for _, c := range cases {
 		before := len(f.auditor.failures)
