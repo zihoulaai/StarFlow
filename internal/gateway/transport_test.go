@@ -61,8 +61,7 @@ func (c *countingMetrics) ConnectionOpened(string) { c.mu.Lock(); c.opened++; c.
 func (c *countingMetrics) ConnectionClosed(string) { c.mu.Lock(); c.closed++; c.mu.Unlock() }
 func (c *countingMetrics) ObserveHeartbeatLost()   {}
 
-func newTestTransport(t *testing.T, r authenticator, lim connLimiter) (*Transport, *Store, *Lifecycle, *countingMetrics) {
-	t.Helper()
+func newTestTransport(r authenticator, lim connLimiter) (*Transport, *Store, *Lifecycle, *countingMetrics) {
 	store := NewStore()
 	shards := NewShardSet(8)
 	life := NewLifecycle(store, shards, LifecycleConfig{
@@ -143,7 +142,7 @@ func subIdentity() auth.Identity {
 // in it, so a client never needs a second round trip to start receiving.
 func TestHandshakeSubscribesInOneRoundTrip(t *testing.T) {
 	res := &stubResolver{identity: subIdentity()}
-	tr, store, _, metrics := newTestTransport(t, res, nil)
+	tr, store, _, metrics := newTestTransport(res, nil)
 
 	c := dialSub(t, tr)
 	sendJSON(t, c, map[string]any{"op": "hello", "token": "good-token", "channels": []string{"room:1"}})
@@ -178,7 +177,7 @@ func TestHandshakeSubscribesInOneRoundTrip(t *testing.T) {
 // handshake carrying one must be accepted on the subscriber transport too.
 func TestHandshakeAcceptsApplicationSecret(t *testing.T) {
 	res := &stubResolver{identity: subIdentity()}
-	tr, _, _, _ := newTestTransport(t, res, nil)
+	tr, _, _, _ := newTestTransport(res, nil)
 
 	c := dialSub(t, tr)
 	sendJSON(t, c, map[string]any{"op": "hello", "app_key": "ak", "token": "good-secret"})
@@ -192,7 +191,7 @@ func TestHandshakeAcceptsApplicationSecret(t *testing.T) {
 // the SDK can report why instead of timing out.
 func TestBadCredentialIsRefusedWithAReason(t *testing.T) {
 	res := &stubResolver{identity: subIdentity(), err: auth.ErrTokenSignature}
-	tr, store, _, _ := newTestTransport(t, res, nil)
+	tr, store, _, _ := newTestTransport(res, nil)
 
 	c := dialSub(t, tr)
 	sendJSON(t, c, map[string]any{"op": "hello", "token": "nope"})
@@ -216,7 +215,7 @@ func TestSubscribePrivilegeIsRequired(t *testing.T) {
 		TenantID: "t1", AppKey: "ak", Subject: "u1",
 		Privileges: auth.Privileges(true, false),
 	}}
-	tr, _, _, _ := newTestTransport(t, res, nil)
+	tr, _, _, _ := newTestTransport(res, nil)
 
 	c := dialSub(t, tr)
 	sendJSON(t, c, map[string]any{"op": "hello", "token": "good-token"})
@@ -231,7 +230,7 @@ func TestSubscribePrivilegeIsRequired(t *testing.T) {
 func TestTenantConnectionLimitIsEnforced(t *testing.T) {
 	res := &stubResolver{identity: subIdentity()}
 	lim := &fixedLimiter{allow: false}
-	tr, _, _, _ := newTestTransport(t, res, lim)
+	tr, _, _, _ := newTestTransport(res, lim)
 
 	c := dialSub(t, tr)
 	sendJSON(t, c, map[string]any{"op": "hello", "token": "good-token"})
@@ -303,7 +302,7 @@ func TestRefusedChannelIsReported(t *testing.T) {
 // paying egress for content it no longer wants.
 func TestUnsubscribeRemovesTheChannel(t *testing.T) {
 	res := &stubResolver{identity: subIdentity()}
-	tr, store, _, _ := newTestTransport(t, res, nil)
+	tr, store, _, _ := newTestTransport(res, nil)
 
 	c := dialSub(t, tr)
 	sendJSON(t, c, map[string]any{"op": "hello", "token": "good-token", "channels": []string{"room:1"}})
@@ -318,7 +317,7 @@ func TestUnsubscribeRemovesTheChannel(t *testing.T) {
 // healthy connection.
 func TestPingIsAnswered(t *testing.T) {
 	res := &stubResolver{identity: subIdentity()}
-	tr, _, _, _ := newTestTransport(t, res, nil)
+	tr, _, _, _ := newTestTransport(res, nil)
 
 	c := dialSub(t, tr)
 	sendJSON(t, c, map[string]any{"op": "hello", "token": "good-token"})
@@ -334,7 +333,7 @@ func TestPingIsAnswered(t *testing.T) {
 // is still healthy. QoS0 already tolerates loss.
 func TestMalformedFrameDoesNotCloseTheConnection(t *testing.T) {
 	res := &stubResolver{identity: subIdentity()}
-	tr, store, _, _ := newTestTransport(t, res, nil)
+	tr, store, _, _ := newTestTransport(res, nil)
 
 	c := dialSub(t, tr)
 	sendJSON(t, c, map[string]any{"op": "hello", "token": "good-token", "channels": []string{"room:1"}})
@@ -432,7 +431,7 @@ func waitFor(t *testing.T, cond func() bool) {
 // coalesced batch into per-message frames without re-encoding per connection.
 func TestWriteBridgeDeliversABatch(t *testing.T) {
 	res := &stubResolver{identity: subIdentity()}
-	tr, store, _, _ := newTestTransport(t, res, nil)
+	tr, store, _, _ := newTestTransport(res, nil)
 
 	c := dialSub(t, tr)
 	sendJSON(t, c, map[string]any{"op": "hello", "token": "good-token", "channels": []string{"room:1"}})
@@ -481,7 +480,7 @@ var _ = http.StatusOK
 // what the race detector runs.
 func TestConcurrentWritesAreSerialised(t *testing.T) {
 	res := &stubResolver{identity: subIdentity()}
-	tr, store, _, _ := newTestTransport(t, res, nil)
+	tr, store, _, _ := newTestTransport(res, nil)
 
 	c := dialSub(t, tr)
 	sendJSON(t, c, map[string]any{"op": "hello", "token": "good-token", "channels": []string{"room:1"}})

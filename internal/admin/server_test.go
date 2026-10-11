@@ -280,8 +280,7 @@ type adminFixture struct {
 	degrade *fakeDegrade
 }
 
-func newAdminFixture(t *testing.T) *adminFixture {
-	t.Helper()
+func newAdminFixture() *adminFixture {
 	store := newFakeStore()
 	audit := &fakeAuditor{}
 	auth := &fakeAuthorizer{roles: map[string]Role{
@@ -333,7 +332,7 @@ func (f *adminFixture) do(method, path, subject string, body any) *httptest.Resp
 
 // An unknown principal must be refused, and the attempt recorded.
 func TestUnauthorizedCallIsRefused(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 	rec := f.do(http.MethodGet, "/admin/tenants", "nobody@example.com", nil)
 
 	if rec.Code != http.StatusUnauthorized {
@@ -345,7 +344,7 @@ func TestUnauthorizedCallIsRefused(t *testing.T) {
 // safe to give an operator visibility without giving them the ability to
 // disable a tenant's authentication.
 func TestViewerCannotMutate(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 
 	if rec := f.do(http.MethodGet, "/admin/tenants", "viewer@example.com", nil); rec.Code != http.StatusOK {
 		t.Errorf("viewer read status = %d, want 200", rec.Code)
@@ -359,7 +358,7 @@ func TestViewerCannotMutate(t *testing.T) {
 
 // A principal for one tenant must not act on another, even naming it.
 func TestTenantIsScopedToThePrincipal(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 
 	// t2's admin is not granted anything in t1.
 	f.auth.roles["t2/outsider@example.com"] = RoleAdmin
@@ -375,7 +374,7 @@ func TestTenantIsScopedToThePrincipal(t *testing.T) {
 func TestLookupDistinguishesAbsentFromUnreachable(t *testing.T) {
 	seed := func(t *testing.T) *adminFixture {
 		t.Helper()
-		f := newAdminFixture(t)
+		f := newAdminFixture()
 		if rec := f.do(http.MethodPost, "/admin/tenants", "admin@example.com",
 			map[string]any{"name": "acme"}); rec.Code != http.StatusCreated {
 			t.Fatalf("seeding tenant: status %d", rec.Code)
@@ -415,7 +414,7 @@ func TestLookupDistinguishesAbsentFromUnreachable(t *testing.T) {
 
 // Every mutation must be attributable: who, when, against what.
 func TestEveryMutationIsAttributed(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 
 	cases := []struct {
 		method    string
@@ -474,7 +473,7 @@ func TestEveryMutationIsAttributed(t *testing.T) {
 // Reads must not be audited as changes; otherwise the audit trail is useless for
 // answering what changed.
 func TestReadsAreNotAttributedAsChanges(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 	f.do(http.MethodGet, "/admin/tenants", "admin@example.com", nil)
 	f.do(http.MethodGet, "/admin/connections", "admin@example.com", nil)
 	f.do(http.MethodGet, "/admin/quotas/", "admin@example.com", nil)
@@ -489,7 +488,7 @@ func TestReadsAreNotAttributedAsChanges(t *testing.T) {
 // An application's secret is returned exactly once, at creation, and never on a
 // read.
 func TestSecretIsReturnedOnceAndNeverExposed(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 
 	rec := f.do(http.MethodPost, "/admin/applications", "admin@example.com",
 		map[string]any{"name": "app", "can_publish": true, "can_subscribe": true})
@@ -522,7 +521,7 @@ func TestSecretIsReturnedOnceAndNeverExposed(t *testing.T) {
 // Disabling an application must say so in the audit trail, because it ends live
 // connections and an operator later needs to know why.
 func TestDisablingApplicationIsRecorded(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 	rec := f.do(http.MethodPost, "/admin/applications", "admin@example.com",
 		map[string]any{"name": "app"})
 	var created struct {
@@ -548,7 +547,7 @@ func TestDisablingApplicationIsRecorded(t *testing.T) {
 }
 
 func TestRotationIsAttributed(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 	rec := f.do(http.MethodPost, "/admin/applications", "admin@example.com",
 		map[string]any{"name": "app"})
 	var created struct {
@@ -572,7 +571,7 @@ func TestRotationIsAttributed(t *testing.T) {
 // Lowering a connection ceiling below current usage is allowed, and must be
 // recorded, because existing connections are not ended by it.
 func TestLoweredConnectionCeilingIsRecorded(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 	rec := f.do(http.MethodPut, "/admin/quotas/", "admin@example.com",
 		QuotaView{MaxConnections: 0, MaxPublishQPS: 50})
 	if rec.Code != http.StatusOK {
@@ -588,7 +587,7 @@ func TestLoweredConnectionCeilingIsRecorded(t *testing.T) {
 }
 
 func TestChannelViewReportsDerivedVersusOverridden(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 
 	// An override must be distinguishable from a derived ceiling, or an operator
 	// cannot tell why a channel is behaving as it is.
@@ -608,7 +607,7 @@ func TestChannelViewReportsDerivedVersusOverridden(t *testing.T) {
 }
 
 func TestConnectionListingIsTenantScoped(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 	rec := f.do(http.MethodGet, "/admin/connections", "admin@example.com", nil)
 
 	var views []ConnectionView
@@ -626,7 +625,7 @@ func TestConnectionListingIsTenantScoped(t *testing.T) {
 }
 
 func TestTerminatingOneConnectionLeavesOthers(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 
 	rec := f.do(http.MethodDelete, "/admin/connections/?connection_id=1", "admin@example.com", nil)
 	if rec.Code != http.StatusNoContent {
@@ -645,7 +644,7 @@ func TestTerminatingOneConnectionLeavesOthers(t *testing.T) {
 }
 
 func TestDegradationControl(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 
 	rec := f.do(http.MethodPut, "/admin/degradation", "admin@example.com",
 		map[string]any{"manual": true, "level": 3})
@@ -669,7 +668,7 @@ func TestDegradationControl(t *testing.T) {
 }
 
 func TestMissingTenantOrPrincipalIsRejected(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/tenants", nil)
 	rec := httptest.NewRecorder()
@@ -680,7 +679,7 @@ func TestMissingTenantOrPrincipalIsRejected(t *testing.T) {
 }
 
 func TestUnsupportedMethodsAreRejected(t *testing.T) {
-	f := newAdminFixture(t)
+	f := newAdminFixture()
 	if rec := f.do(http.MethodDelete, "/admin/tenants", "admin@example.com", nil); rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", rec.Code)
 	}

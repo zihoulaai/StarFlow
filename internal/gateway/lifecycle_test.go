@@ -16,8 +16,7 @@ type lifecycleFixture struct {
 	now    time.Time
 }
 
-func newLifecycleFixture(t *testing.T) *lifecycleFixture {
-	t.Helper()
+func newLifecycleFixture() *lifecycleFixture {
 	store := NewStore()
 	shards := NewShardSet(64)
 	f := &lifecycleFixture{
@@ -52,7 +51,7 @@ func (f *lifecycleFixture) track(t *testing.T, id uint64, channels ...string) *C
 // A subscriber that stops answering must be closed and its subscriptions
 // released, or it holds channel state forever.
 func TestLivenessClosesUnresponsiveConnection(t *testing.T) {
-	f := newLifecycleFixture(t)
+	f := newLifecycleFixture()
 	conn := f.track(t, 1, "room:1", "room:2")
 
 	// No response at all.
@@ -88,7 +87,7 @@ func TestLivenessClosesUnresponsiveConnection(t *testing.T) {
 // Answering a probe must reset the deadline; a healthy connection must never be
 // reaped.
 func TestLivenessKeepsRespondingConnection(t *testing.T) {
-	f := newLifecycleFixture(t)
+	f := newLifecycleFixture()
 	f.track(t, 1, "room:1")
 
 	for round := 0; round < 20; round++ {
@@ -106,7 +105,7 @@ func TestLivenessKeepsRespondingConnection(t *testing.T) {
 // An intermediary can drop a connection without a close frame. Only a probe
 // reveals that, so the probe has to exist.
 func TestLivenessDetectsSilentlyDroppedConnection(t *testing.T) {
-	f := newLifecycleFixture(t)
+	f := newLifecycleFixture()
 	conn := f.track(t, 1, "room:1")
 
 	// The client vanished without telling us; the last we saw was now.
@@ -126,8 +125,8 @@ func TestLivenessDetectsSilentlyDroppedConnection(t *testing.T) {
 // Probing and reaping share one walk, so the cost is proportional to connection
 // count once per interval and does not grow with message volume.
 func TestLivenessCostIsIndependentOfTraffic(t *testing.T) {
-	quiet := newLifecycleFixture(t)
-	busy := newLifecycleFixture(t)
+	quiet := newLifecycleFixture()
+	busy := newLifecycleFixture()
 
 	const conns = 500
 	for i := 0; i < conns; i++ {
@@ -171,7 +170,7 @@ func TestLivenessCostIsIndependentOfTraffic(t *testing.T) {
 // A subscriber holding queued content past the tolerance is closed. The buffer
 // is already bounded, so there is no room left to give it.
 func TestSlowSubscriberIsReaped(t *testing.T) {
-	f := newLifecycleFixture(t)
+	f := newLifecycleFixture()
 	conn := f.track(t, 1, "room:1")
 
 	conn.Enqueue([]byte("backlog"), 1)
@@ -199,7 +198,7 @@ func TestSlowSubscriberIsReaped(t *testing.T) {
 
 // A connection that keeps draining must never be classified as slow.
 func TestHealthyConnectionIsNotSlow(t *testing.T) {
-	f := newLifecycleFixture(t)
+	f := newLifecycleFixture()
 	conn := f.track(t, 1, "room:1")
 
 	for i := 0; i < 50; i++ {
@@ -215,7 +214,7 @@ func TestHealthyConnectionIsNotSlow(t *testing.T) {
 // A draining instance is expected to have connections that will not be written
 // to before they close, so they must not be reaped as slow.
 func TestDrainingConnectionsAreNotReapedAsSlow(t *testing.T) {
-	f := newLifecycleFixture(t)
+	f := newLifecycleFixture()
 	conn := f.track(t, 1, "room:1")
 	conn.Enqueue([]byte("backlog"), 1)
 
@@ -232,7 +231,7 @@ func TestDrainingConnectionsAreNotReapedAsSlow(t *testing.T) {
 // window. Without the wait, a release is a synchronized mass reconnect and each
 // reconnect is a full handshake.
 func TestDrainSequence(t *testing.T) {
-	f := newLifecycleFixture(t)
+	f := newLifecycleFixture()
 	a := f.track(t, 1, "room:1")
 	b := f.track(t, 2, "room:1")
 
@@ -286,7 +285,7 @@ func TestPingPongFrames(t *testing.T) {
 // Close is idempotent: a drain and a heartbeat timeout can reach the same
 // connection.
 func TestCloseIsIdempotent(t *testing.T) {
-	f := newLifecycleFixture(t)
+	f := newLifecycleFixture()
 	conn := f.track(t, 1, "room:1", "room:2")
 
 	var closes int
@@ -305,7 +304,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 }
 
 func TestConcurrentLifecycleOperations(t *testing.T) {
-	f := newLifecycleFixture(t)
+	f := newLifecycleFixture()
 
 	var wg sync.WaitGroup
 	for g := 0; g < 8; g++ {
@@ -332,7 +331,7 @@ func TestConcurrentLifecycleOperations(t *testing.T) {
 // explicitly, because a future change that quietly adds persistence,
 // acknowledgement, or replay would otherwise pass every existing test.
 func TestQoS0Semantics(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	conn := f.subscribe(t, 1, "t1", "room:1")
 	f.coalesce.SetCoalescing("t1", "room:1", false)
 
@@ -430,7 +429,7 @@ func TestQoS0Semantics(t *testing.T) {
 // terminate that returns true while the connection lives would leave the
 // operator watching a client they believe they evicted still receiving data.
 func TestTerminateClosesConnectionAndReleasesSubscriptions(t *testing.T) {
-	f := newLifecycleFixture(t)
+	f := newLifecycleFixture()
 	conn := f.track(t, 1, "room:1", "room:2")
 
 	if !f.lc.Terminate("t1", 1) {
@@ -454,7 +453,7 @@ func TestTerminateClosesConnectionAndReleasesSubscriptions(t *testing.T) {
 // lookup itself. Filtering only the listing would let an administrator granted
 // one tenant close another's connection by naming its id.
 func TestTerminateIsScopedToItsTenant(t *testing.T) {
-	f := newLifecycleFixture(t)
+	f := newLifecycleFixture()
 	conn := f.track(t, 7, "room:1")
 
 	if f.lc.Terminate("t2", 7) {
@@ -474,7 +473,7 @@ func TestTerminateIsScopedToItsTenant(t *testing.T) {
 // The instance-wide view has no tenant in the path, so an empty tenant has to
 // match any rather than matching none.
 func TestTerminateWithEmptyTenantMatchesAnyTenant(t *testing.T) {
-	f := newLifecycleFixture(t)
+	f := newLifecycleFixture()
 	conn := f.track(t, 3, "room:1")
 
 	if !f.lc.Terminate("", 3) {

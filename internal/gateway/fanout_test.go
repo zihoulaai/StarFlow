@@ -19,8 +19,7 @@ type fanoutFixture struct {
 	now      time.Time
 }
 
-func newFanoutFixture(t *testing.T) *fanoutFixture {
-	t.Helper()
+func newFanoutFixture() *fanoutFixture {
 	f := &fanoutFixture{
 		store:    NewStore(),
 		shards:   NewShardSet(64),
@@ -142,11 +141,11 @@ func (f *fanoutFixture) gapsFor(id uint64) []protocol.GapNotice {
 // broadcast the message crosses the bus, and a subscriber on another instance
 // must receive it exactly once.
 func TestFanoutDeliversToASubscriberOnAnotherInstance(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	subscriber := f.subscribe(t, 1, "t1", "room:1")
 
 	// A separate engine, playing the instance that accepted the publish.
-	publisher := newFanoutFixture(t)
+	publisher := newFanoutFixture()
 	publisher.store = f.store
 
 	env := bus.Envelope{TenantID: "t1", Channel: "room:1", MessageID: 7, Body: []byte("hello")}
@@ -170,7 +169,7 @@ func TestFanoutDeliversToASubscriberOnAnotherInstance(t *testing.T) {
 // A message destined for a channel this instance does not serve is the common
 // case under broadcast. It must be discarded cheaply, not treated as an error.
 func TestFanoutDiscardsUnservedChannel(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 
 	n, err := f.fanout.Dispatch(bus.Envelope{TenantID: "t1", Channel: "elsewhere", MessageID: 1})
 	if err != nil {
@@ -187,7 +186,7 @@ func TestFanoutDiscardsUnservedChannel(t *testing.T) {
 // Exactly one copy per subscriber: a duplicate here would be a correctness
 // failure no rate or latency metric would reveal.
 func TestFanoutDeliversExactlyOncePerSubscriber(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	for i := 0; i < 20; i++ {
 		f.subscribe(t, uint64(i+1), "t1", "room:1")
 	}
@@ -213,7 +212,7 @@ func TestFanoutDeliversExactlyOncePerSubscriber(t *testing.T) {
 
 // Two tenants may use the same channel name without observing each other.
 func TestFanoutRespectsTenantIsolation(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	a := f.subscribe(t, 1, "t1", "shared")
 	b := f.subscribe(t, 2, "t2", "shared")
 
@@ -235,7 +234,7 @@ func TestFanoutRespectsTenantIsolation(t *testing.T) {
 // A publisher-requested lifetime must drop late arrivals with no persisted
 // state and nothing scheduled.
 func TestFanoutHonoursRequestedExpiry(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	conn := f.subscribe(t, 1, "t1", "room:1")
 
 	nowMs := uint64(f.now.UnixMilli())
@@ -256,7 +255,7 @@ func TestFanoutHonoursRequestedExpiry(t *testing.T) {
 }
 
 func TestFanoutCoalescesWithinWindow(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	conn := f.subscribe(t, 1, "t1", "room:1")
 
 	// A merge ratio of 20 with a long window, so only the count closes it.
@@ -288,7 +287,7 @@ func TestFanoutCoalescesWithinWindow(t *testing.T) {
 
 // Coalescing disabled must send each message on its own.
 func TestFanoutWithCoalescingDisabled(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	conn := f.subscribe(t, 1, "t1", "room:1")
 	f.coalesce.SetCoalescing("t1", "room:1", false)
 
@@ -317,7 +316,7 @@ func TestFanoutWithCoalescingDisabled(t *testing.T) {
 // One message must serialize once regardless of how many subscribers receive
 // it. This is the property the whole fanout model rests on.
 func TestFanoutSerializesOncePerMessage(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	const subscribers = 500
 	for i := 0; i < subscribers; i++ {
 		f.subscribe(t, uint64(i+1), "t1", "room:1")
@@ -358,7 +357,7 @@ func TestFanoutSerializesOncePerMessage(t *testing.T) {
 // Delivery to the healthy subscribers of the same channel must be unaffected,
 // which is the whole point of a per-connection bound rather than a shared queue.
 func TestFanoutIsolatesUndersizedSubscriber(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	healthy := f.subscribe(t, 1, "t1", "room:1")
 	// Coalescing off so the buffer bound, not batch size, decides what fits.
 	f.coalesce.SetCoalescing("t1", "room:1", false)
@@ -402,7 +401,7 @@ func TestFanoutIsolatesUndersizedSubscriber(t *testing.T) {
 // A connection that has stopped accepting new work, because it is draining or
 // closed, must be skipped without disturbing the others.
 func TestFanoutSkipsNonAcceptingConnections(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	healthy := f.subscribe(t, 1, "t1", "room:1")
 	closing := f.subscribe(t, 2, "t1", "room:1")
 	closing.SetState(ConnClosed)
@@ -425,7 +424,7 @@ func TestFanoutSkipsNonAcceptingConnections(t *testing.T) {
 
 // The gap notice must precede the content that follows a drop.
 func TestGapNoticePrecedesSubsequentContent(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	conn := NewConn(1, ConnConfig{TenantID: "t1", Subject: "u", WriteBufBytes: 512, ReadBufBytes: 1024, PerViewerBps: 2048, Shards: f.shards})
 	if _, err := f.store.Subscribe("t1", "room:1", conn); err != nil {
 		t.Fatalf("Subscribe: %v", err)
@@ -477,13 +476,13 @@ func TestGapNoticePrecedesSubsequentContent(t *testing.T) {
 }
 
 func TestFanoutRunConsumesBus(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	conn := f.subscribe(t, 1, "t1", "room:1")
 
 	b := bus.NewMemoryBus()
 	defer b.Close()
 
-	ctx, cancel := contextWithTimeout(t, 2*time.Second)
+	ctx, cancel := contextWithTimeout(2 * time.Second)
 	defer cancel()
 
 	runCtx, stopRun := contextWithCancel(ctx)
@@ -509,7 +508,7 @@ func TestFanoutRunConsumesBus(t *testing.T) {
 }
 
 func TestFanoutStats(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	for i := 0; i < 10; i++ {
 		f.subscribe(t, uint64(i+1), "t1", "room:1")
 	}
@@ -542,7 +541,7 @@ func TestFanoutStats(t *testing.T) {
 }
 
 func TestFanoutFactorIsZeroWhenNothingAdmitted(t *testing.T) {
-	f := newFanoutFixture(t)
+	f := newFanoutFixture()
 	if got := f.fanout.Snapshot().FanoutFactor(); got != 0 {
 		t.Errorf("fanout factor = %v with nothing admitted, want 0", got)
 	}

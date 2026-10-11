@@ -354,8 +354,7 @@ func timeIt(f func() int) time.Duration {
 	return time.Since(start)
 }
 
-func contextWithTimeout(t *testing.T, d time.Duration) (context.Context, context.CancelFunc) {
-	t.Helper()
+func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), d)
 }
 

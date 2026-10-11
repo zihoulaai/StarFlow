@@ -27,8 +27,7 @@ func (c *fakeClock) Add(d time.Duration) time.Time {
 	return time.UnixMilli(c.ms.Add(int64(d.Milliseconds())))
 }
 
-func newDegradeFixture(t *testing.T) (*Degradation, *fakeClock) {
-	t.Helper()
+func newDegradeFixture() (*Degradation, *fakeClock) {
 	clock := newFakeClock()
 	d := NewDegradation(DegradationConfig{Dwell: 100 * time.Millisecond, RestoreAfter: time.Second},
 		clock.Now)
@@ -79,7 +78,7 @@ func TestLadderSpanIsMonotonic(t *testing.T) {
 // A momentary spike must not degrade visible quality. That is the entire reason
 // the ladder waits rather than reacting to each pass.
 func TestBriefSpikeDoesNotEscalate(t *testing.T) {
-	d, clock := newDegradeFixture(t)
+	d, clock := newDegradeFixture()
 
 	d.Observe(true)
 	if l := d.Level(); l != LevelNormal {
@@ -95,7 +94,7 @@ func TestBriefSpikeDoesNotEscalate(t *testing.T) {
 }
 
 func TestSustainedLoadEscalates(t *testing.T) {
-	d, clock := newDegradeFixture(t)
+	d, clock := newDegradeFixture()
 
 	d.Observe(true)
 	for i := 0; i < 10 && d.Level() < MaxLevel; i++ {
@@ -112,7 +111,7 @@ func TestSustainedLoadEscalates(t *testing.T) {
 }
 
 func TestRecoveryRestoresGradually(t *testing.T) {
-	d, clock := newDegradeFixture(t)
+	d, clock := newDegradeFixture()
 
 	// Climb to the top.
 	d.Observe(true)
@@ -144,7 +143,7 @@ func TestRecoveryRestoresGradually(t *testing.T) {
 // A load oscillating around the threshold must not drive the ladder up and down,
 // which a user would see as repeated stuttering.
 func TestOscillatingLoadDoesNotThrash(t *testing.T) {
-	d, clock := newDegradeFixture(t)
+	d, clock := newDegradeFixture()
 
 	d.Observe(true)
 	clock.Add(150 * time.Millisecond)
@@ -163,7 +162,7 @@ func TestOscillatingLoadDoesNotThrash(t *testing.T) {
 
 // An operator override wins over the metrics, until it is explicitly released.
 func TestManualOverride(t *testing.T) {
-	d, _ := newDegradeFixture(t)
+	d, _ := newDegradeFixture()
 
 	d.SetManual(true, LevelCritical)
 	if d.Level() != LevelCritical {
@@ -188,7 +187,7 @@ func TestManualOverride(t *testing.T) {
 // System content must always be deliverable: a moderation notice shed under load
 // is a correctness failure.
 func TestSystemPrioritySurvivesEveryLevel(t *testing.T) {
-	d, _ := newDegradeFixture(t)
+	d, _ := newDegradeFixture()
 	for l := LevelNormal; l <= MaxLevel; l++ {
 		d.SetManual(true, l)
 		if !d.Admit(protocol.PrioritySystem) {
@@ -198,7 +197,7 @@ func TestSystemPrioritySurvivesEveryLevel(t *testing.T) {
 }
 
 func TestSheddingAtCriticalLevel(t *testing.T) {
-	d, _ := newDegradeFixture(t)
+	d, _ := newDegradeFixture()
 	d.SetManual(true, LevelCritical)
 
 	if d.Admit(protocol.PriorityNormal) {
@@ -215,7 +214,7 @@ func TestSheddingAtCriticalLevel(t *testing.T) {
 // Sampling must reduce volume without ever admitting everything once the rate is
 // below one, and must not be pathologically lumpy over a window.
 func TestSamplingRate(t *testing.T) {
-	d, _ := newDegradeFixture(t)
+	d, _ := newDegradeFixture()
 	d.SetManual(true, LevelSampled)
 
 	rate := Policy(LevelSampled).SampleRate
@@ -233,7 +232,7 @@ func TestSamplingRate(t *testing.T) {
 }
 
 func TestSamplingAtNormalAdmitsEverything(t *testing.T) {
-	d, _ := newDegradeFixture(t)
+	d, _ := newDegradeFixture()
 	d.SetManual(true, LevelNormal)
 	for i := uint64(0); i < 1000; i++ {
 		if !d.Sample(i) {
@@ -243,7 +242,7 @@ func TestSamplingAtNormalAdmitsEverything(t *testing.T) {
 }
 
 func TestWindowMultiplierGrowsWithLevel(t *testing.T) {
-	d, _ := newDegradeFixture(t)
+	d, _ := newDegradeFixture()
 	prev := 0.0
 	for l := LevelNormal; l <= MaxLevel; l++ {
 		d.SetManual(true, l)
@@ -259,7 +258,7 @@ func TestWindowMultiplierGrowsWithLevel(t *testing.T) {
 }
 
 func TestConcurrentLadderMovement(t *testing.T) {
-	d, clock := newDegradeFixture(t)
+	d, clock := newDegradeFixture()
 
 	var wg sync.WaitGroup
 	for g := 0; g < 8; g++ {

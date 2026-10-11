@@ -10,14 +10,13 @@ import (
 	"github.com/starflow/push/internal/controlplane"
 )
 
-func testSigner(t *testing.T, now func() time.Time) *Signer {
-	t.Helper()
+func testSigner(now func() time.Time) *Signer {
 	return NewSigner([]byte("test-signing-key"), 5*time.Minute, 2*time.Minute, now)
 }
 
 func TestTokenRoundTrip(t *testing.T) {
 	clock := time.UnixMilli(1_700_000_000_000)
-	s := testSigner(t, func() time.Time { return clock })
+	s := testSigner(func() time.Time { return clock })
 
 	token, err := s.Issue("ak_1", "user-42", "tenant-1")
 	if err != nil {
@@ -39,7 +38,7 @@ func TestTokenRoundTrip(t *testing.T) {
 // a signature failure rather than as an expiry problem.
 func TestVerifyRejectsForeignSignature(t *testing.T) {
 	clock := time.UnixMilli(1_700_000_000_000)
-	a := testSigner(t, func() time.Time { return clock })
+	a := testSigner(func() time.Time { return clock })
 	b := NewSigner([]byte("a-completely-different-key"), 5*time.Minute, 2*time.Minute,
 		func() time.Time { return clock })
 
@@ -54,7 +53,7 @@ func TestVerifyRejectsForeignSignature(t *testing.T) {
 
 func TestVerifyRejectsTamperedClaims(t *testing.T) {
 	clock := time.UnixMilli(1_700_000_000_000)
-	s := testSigner(t, func() time.Time { return clock })
+	s := testSigner(func() time.Time { return clock })
 
 	token, err := s.Issue("ak_1", "user-1", "tenant-1")
 	if err != nil {
@@ -77,7 +76,7 @@ func TestVerifyRejectsTamperedClaims(t *testing.T) {
 }
 
 func TestVerifyRejectsMalformedTokens(t *testing.T) {
-	s := testSigner(t, time.Now)
+	s := testSigner(time.Now)
 
 	for _, token := range []string{
 		"", "not-a-token", "v1.only-two", "v2.a.b.c",
@@ -91,7 +90,7 @@ func TestVerifyRejectsMalformedTokens(t *testing.T) {
 
 func TestVerifyRejectsExpiredToken(t *testing.T) {
 	clock := time.UnixMilli(1_700_000_000_000)
-	s := testSigner(t, func() time.Time { return clock })
+	s := testSigner(func() time.Time { return clock })
 
 	token, err := s.Issue("ak_1", "u", "t")
 	if err != nil {
@@ -113,7 +112,7 @@ func TestVerifyRejectsExpiredToken(t *testing.T) {
 // operator can tell a clock problem from a forgery attempt.
 func TestVerifyEnforcesSkewWindow(t *testing.T) {
 	clock := time.UnixMilli(1_700_000_000_000)
-	s := testSigner(t, func() time.Time { return clock })
+	s := testSigner(func() time.Time { return clock })
 
 	token, err := s.Issue("ak_1", "u", "t")
 	if err != nil {
@@ -139,7 +138,7 @@ func TestVerifyEnforcesSkewWindow(t *testing.T) {
 func TestVerifyRejectsFarFutureToken(t *testing.T) {
 	base := time.UnixMilli(1_700_000_000_000)
 	clock := base.Add(30 * time.Minute)
-	futureSigner := testSigner(t, func() time.Time { return clock })
+	futureSigner := testSigner(func() time.Time { return clock })
 
 	token, err := futureSigner.Issue("ak_1", "u", "t")
 	if err != nil {
@@ -148,7 +147,7 @@ func TestVerifyRejectsFarFutureToken(t *testing.T) {
 
 	// Verify against the real clock: the token is not yet expired, but its
 	// issue time is half an hour ahead of a two-minute skew window.
-	present := testSigner(t, func() time.Time { return base })
+	present := testSigner(func() time.Time { return base })
 	_, err = present.Verify(token)
 	if !errors.Is(err, ErrTokenSkew) {
 		t.Errorf("far-future token err = %v, want ErrTokenSkew", err)
@@ -156,7 +155,7 @@ func TestVerifyRejectsFarFutureToken(t *testing.T) {
 }
 
 func TestIssueRequiresAppKey(t *testing.T) {
-	s := testSigner(t, time.Now)
+	s := testSigner(time.Now)
 	if _, err := s.Issue("", "u", "t"); err == nil {
 		t.Error("token issued without an app key")
 	}
