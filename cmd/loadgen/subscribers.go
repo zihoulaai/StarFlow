@@ -26,24 +26,25 @@ type subscribers struct {
 	cfg config
 
 	// sentAt maps an admitted message id to the instant its publish response
-	// arrived. A subscriber that sees the id computes the delivery latency from
-	// it, which is the only way to measure the asynchronous fanout path end to
-	// end.
+	// arrived. A probe subscriber that sees the id computes the delivery latency
+	// from it, which is the only way to measure the asynchronous fanout path end
+	// to end.
 	//
-	// LoadAndDelete in the receive path is deliberate: with many subscribers on
-	// one channel every message arrives N times, and the first arrival is the
-	// one a viewer experiences. Deleting on read keeps the map bounded by the
-	// in-flight window rather than by the run length.
+	// It is consulted only by probes. If every subscriber consumed it, the map
+	// would hold one sample per message rather than one per admitted message,
+	// and the figures that matter — deliveries and bytes leaving the instance —
+	// would describe one subscriber instead of the fanout.
 	sentAt sync.Map
 
 	dialed      atomic.Int64
 	established atomic.Int64
 	ready       atomic.Int64
-	delivered   atomic.Int64
+	delivered   atomic.Uint64
 	bytesIn     atomic.Uint64
 	gapNotices  atomic.Uint64
 	dialErrors  atomic.Int64
 	readErrors  atomic.Int64
+	probes      atomic.Int64
 
 	mu        sync.Mutex
 	latencies []time.Duration
@@ -107,6 +108,16 @@ func (s *subscribers) ramp(ctx context.Context, rampWindow time.Duration) error 
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 
+	// The first connections are probes: they are the ones whose arrival times
+	// are matched against the publish side to produce a latency distribution.
+	// Every connection after them carries the fanout load without contributing a
+	// sample, so raising the connection count changes what the instance pushes
+	// rather than how the latency is sampled.
+	probes := s.cfg.probeConnections
+	if probes > total {
+		probes = total
+	}
+
 	for i := 0; i < total; i++ {
 		select {
 		case <-ctx.Done():
@@ -115,10 +126,11 @@ func (s *subscribers) ramp(ctx context.Context, rampWindow time.Duration) error 
 		case <-ticker.C:
 		}
 		s.dialed.Add(1)
+		isProbe := i < probes
 		dialed.Add(1)
 		go func() {
 			defer dialed.Done()
-			s.connect(ctx, dialer, url)
+			s.connect(ctx, dialer, url, isProbe)
 		}()
 	}
 	dialed.Wait()
@@ -127,7 +139,7 @@ func (s *subscribers) ramp(ctx context.Context, rampWindow time.Duration) error 
 
 // connect dials one subscriber, completes the handshake, and leaves the read
 // loop running in the background.
-func (s *subscribers) connect(ctx context.Context, dialer *websocket.Dialer, url string) {
+func (s *subscribers) connect(ctx context.Context, dialer *websocket.Dialer, url string, isProbe bool) {
 	conn, _, err := dialer.DialContext(ctx, url, nil)
 	if err != nil {
 		s.dialErrors.Add(1)
@@ -140,6 +152,9 @@ func (s *subscribers) connect(ctx context.Context, dialer *websocket.Dialer, url
 		return
 	}
 	s.ready.Add(1)
+	if isProbe {
+		s.probes.Add(1)
+	}
 
 	// The read deadline is cleared rather than left at the handshake value: a
 	// subscriber in a quiet channel is healthy precisely because nothing
@@ -151,7 +166,7 @@ func (s *subscribers) connect(ctx context.Context, dialer *websocket.Dialer, url
 		_ = conn.Close()
 	}()
 	go func() {
-		s.readFrames(conn)
+		s.readFrames(conn, isProbe)
 		_ = conn.Close()
 	}()
 }
@@ -221,7 +236,7 @@ func (s *subscribers) handshake(conn *websocket.Conn) error {
 // builds internally. The binary form is an internal encoding: what reaches a
 // socket has already been rendered for a client to parse, so matching delivery
 // against the wire format means reading the JSON the SDK reads.
-func (s *subscribers) readFrames(conn *websocket.Conn) {
+func (s *subscribers) readFrames(conn *websocket.Conn, isProbe bool) {
 	for {
 		kind, data, err := conn.ReadMessage()
 		if err != nil {
@@ -233,7 +248,7 @@ func (s *subscribers) readFrames(conn *websocket.Conn) {
 			// no subscriber could have parsed, so it is ignored deliberately.
 			continue
 		}
-		s.recordTextFrame(conn, data)
+		s.recordTextFrame(conn, data, isProbe)
 	}
 }
 
@@ -246,7 +261,7 @@ type deliveredMessage struct {
 }
 
 // recordTextFrame parses a newline-delimited delivery frame.
-func (s *subscribers) recordTextFrame(conn *websocket.Conn, data []byte) {
+func (s *subscribers) recordTextFrame(conn *websocket.Conn, data []byte, isProbe bool) {
 	now := time.Now()
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
 		line = bytes.TrimSpace(line)
@@ -259,7 +274,7 @@ func (s *subscribers) recordTextFrame(conn *websocket.Conn, data []byte) {
 		}
 		switch m.Op {
 		case "message":
-			s.recordDelivery(m, now)
+			s.recordDelivery(m, now, isProbe)
 		case "gap":
 			s.gapNotices.Add(1)
 		case "error":
@@ -273,25 +288,35 @@ func (s *subscribers) recordTextFrame(conn *websocket.Conn, data []byte) {
 	}
 }
 
-// recordDelivery matches one delivered message against what was published.
+// recordDelivery accounts for one delivered message.
 //
-// The identifier arrives as a decimal string: it uses 63 bits and a JSON
-// number holds at most 53, so parsing it as a number would silently round the
-// high ids and make distinct messages collide.
-func (s *subscribers) recordDelivery(m deliveredMessage, now time.Time) {
+// Every connection counts, and that is the point: deliveries and bytes are what
+// the instance actually pushed to its subscribers, and the capacity model is
+// derived from them. Only a probe consults sentAt, because only a probe can
+// produce a latency sample — the message it matches was published once and
+// arrived N times, and the first arrival is the delivery latency.
+//
+// The identifier arrives as a decimal string: it uses 63 bits and a JSON number
+// holds at most 53, so parsing it as a number would silently round the high ids
+// and make distinct messages collide.
+func (s *subscribers) recordDelivery(m deliveredMessage, now time.Time, isProbe bool) {
+	s.delivered.Add(1)
+	s.bytesIn.Add(uint64(len(m.Body)))
+
+	if !isProbe {
+		return
+	}
 	id, err := strconv.ParseUint(m.ID, 10, 64)
 	if err != nil {
 		return
 	}
-	// LoadAndDelete: with many subscribers on one channel the same id arrives
-	// repeatedly, and only the first arrival is the delivery latency.
-	// Everything after it is the same message reaching another viewer.
+	// LoadAndDelete: probes see every message too, so only the first of them to
+	// arrive records a sample. Every later arrival is the same message reaching a
+	// different viewer, not a second delivery to the same one.
 	sentAt, ok := s.sentAt.LoadAndDelete(id)
 	if !ok {
 		return
 	}
-	s.delivered.Add(1)
-	s.bytesIn.Add(uint64(len(m.Body)))
 	s.mu.Lock()
 	s.latencies = append(s.latencies, now.Sub(sentAt.(time.Time)))
 	s.mu.Unlock()
@@ -328,16 +353,21 @@ func (s *subscribers) noteSent(id uint64, at time.Time) {
 }
 
 // snapshot copies the delivery-side counters.
-func (s *subscribers) snapshot() subscriberReport {
+func (s *subscribers) snapshot(elapsed time.Duration) subscriberReport {
 	s.mu.Lock()
 	lat := append([]time.Duration(nil), s.latencies...)
 	s.mu.Unlock()
 
-	return subscriberReport{
+	secs := elapsed.Seconds()
+	if secs <= 0 {
+		secs = 1
+	}
+	r := subscriberReport{
 		TargetConns:   int64(s.cfg.connections),
 		Dialed:        s.dialed.Load(),
 		Established:   s.established.Load(),
 		Ready:         s.ready.Load(),
+		Probes:        s.probes.Load(),
 		DialErrors:    s.dialErrors.Load(),
 		Delivered:     s.delivered.Load(),
 		BytesIn:       s.bytesIn.Load(),
@@ -346,7 +376,16 @@ func (s *subscribers) snapshot() subscriberReport {
 		DeliveryP95Ms: percentileMs(lat, 0.95),
 		DeliveryP99Ms: percentileMs(lat, 0.99),
 		DeliveryMaxMs: maxMs(lat),
+		DurationSec:   secs,
 	}
+	// Egress is the quantity the whole capacity model is derived from: instance
+	// count follows from connections times the per-viewer budget, so a run has to
+	// report the bytes that actually left rather than the bytes offered.
+	r.EgressBytesPerSec = float64(r.BytesIn) / secs
+	if r.Ready > 0 {
+		r.EgressPerViewerBps = r.EgressBytesPerSec / float64(r.Ready)
+	}
+	return r
 }
 
 func maxMs(d []time.Duration) float64 {
@@ -369,14 +408,26 @@ type subscriberReport struct {
 	Dialed        int64   `json:"dialed"`
 	Established   int64   `json:"established"`
 	Ready         int64   `json:"ready"`
+	Probes        int64   `json:"probes"`
 	DialErrors    int64   `json:"dial_errors"`
-	Delivered     int64   `json:"delivered"`
+	Delivered     uint64  `json:"delivered"`
 	BytesIn       uint64  `json:"bytes_delivered"`
 	GapNotices    uint64  `json:"gap_notices"`
 	DeliveryP50Ms float64 `json:"delivery_p50_ms"`
 	DeliveryP95Ms float64 `json:"delivery_p95_ms"`
 	DeliveryP99Ms float64 `json:"delivery_p99_ms"`
 	DeliveryMaxMs float64 `json:"delivery_max_ms"`
+
+	DurationSec float64 `json:"duration_seconds"`
+	// EgressBytesPerSec is what the instance actually pushed to its
+	// subscribers. The capacity model derives instance count from this figure,
+	// not from the offered publish rate.
+	EgressBytesPerSec float64 `json:"egress_bytes_per_second"`
+	// EgressPerViewerBps is that rate divided by the connections held. The
+	// documented budget is 2 KB/s per viewer, so a run that holds connections
+	// well below the budget per viewer is evidence the budget, not the instance,
+	// is the binding constraint.
+	EgressPerViewerBps float64 `json:"egress_per_viewer_bytes_per_second"`
 }
 
 // print writes the delivery half so it is visible without opening the JSON.
@@ -392,6 +443,8 @@ func (r subscriberReport) print(w io.Writer) {
 	}
 	f("messages delivered  %d\n", r.Delivered)
 	f("bytes delivered     %d\n", r.BytesIn)
+	f("egress              %.0f B/s total, %.0f B/s per viewer over %.0fs\n",
+		r.EgressBytesPerSec, r.EgressPerViewerBps, r.DurationSec)
 	if r.GapNotices != 0 {
 		f("gap notices         %d  (content dropped for a slow subscriber)\n", r.GapNotices)
 	}

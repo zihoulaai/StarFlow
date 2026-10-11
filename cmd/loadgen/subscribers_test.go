@@ -52,9 +52,9 @@ func TestDeliveryLatencyMatchesOnMessageID(t *testing.T) {
 	sent := time.Now().Add(-30 * time.Millisecond)
 	s.noteSent(7, sent)
 
-	s.recordTextFrame(nil, deliveryFrame("room:1", 7, "x"))
+	s.recordTextFrame(nil, deliveryFrame("room:1", 7, "x"), true)
 
-	got := s.snapshot()
+	got := s.snapshot(20 * time.Second)
 	if got.Delivered != 1 {
 		t.Fatalf("delivered = %d, want 1", got.Delivered)
 	}
@@ -72,13 +72,82 @@ func TestOnlyTheFirstArrivalCounts(t *testing.T) {
 
 	frame := deliveryFrame("room:1", 9, "x")
 	for i := 0; i < 5; i++ {
-		s.recordTextFrame(nil, frame)
+		s.recordTextFrame(nil, frame, true)
 	}
 
-	if got := s.snapshot().Delivered; got != 1 {
-		t.Errorf("delivered = %d after five arrivals of one message, want 1", got)
+	// Five arrivals of one message are five deliveries: that is what the
+	// instance pushed, and it is the figure the fanout factor is built from.
+	if got := s.snapshot(20 * time.Second).Delivered; got != 5 {
+		t.Errorf("delivered = %d for five arrivals of one message, want 5", got)
 	}
 }
+
+// Only the first of several probes to see a message records a latency sample.
+// The later arrivals are the same message reaching a different viewer, not a
+// second delivery of it, and sampling them would understate the delivery time.
+func TestOnlyOneLatencySamplePerMessageAcrossProbes(t *testing.T) {
+	s := newSubscribers(config{})
+	s.noteSent(11, time.Now().Add(-20*time.Millisecond))
+
+	frame := deliveryFrame("room:1", 11, "x")
+	for i := 0; i < 5; i++ {
+		s.recordTextFrame(nil, frame, true)
+	}
+
+	s.mu.Lock()
+	n := len(s.latencies)
+	s.mu.Unlock()
+	if n != 1 {
+		t.Errorf("recorded %d latency samples for one message across five probes, want 1", n)
+	}
+}
+
+// A connection that is not a probe carries the fanout load without producing a
+// sample. Its arrivals must still count, or the egress figures would describe
+// one subscriber instead of the fanout the instance actually performed.
+func TestNonProbeConnectionsCountDeliveriesButNotSamples(t *testing.T) {
+	s := newSubscribers(config{})
+	s.noteSent(12, time.Now().Add(-20*time.Millisecond))
+
+	frame := deliveryFrame("room:1", 12, "hello")
+	for i := 0; i < 100; i++ {
+		s.recordTextFrame(nil, frame, false)
+	}
+
+	got := s.snapshot(20 * time.Second)
+	if got.Delivered != 100 {
+		t.Errorf("delivered = %d across 100 non-probe connections, want 100", got.Delivered)
+	}
+	s.mu.Lock()
+	n := len(s.latencies)
+	s.mu.Unlock()
+	if n != 0 {
+		t.Errorf("a non-probe connection recorded %d latency samples, want 0", n)
+	}
+	// The map entry is untouched by a non-probe, so a probe can still match it.
+	if _, ok := s.sentAt.Load(uint64(12)); !ok {
+		t.Error("a non-probe consumed the send-time entry; the probe could not match it")
+	}
+}
+
+// The egress figures are what the capacity model is derived from, so they have
+// to follow the connection count rather than staying flat.
+func TestEgressPerViewerTracksTheConnectionCount(t *testing.T) {
+	s := newSubscribers(cfgWithConns(1000))
+	s.ready.Store(1000)
+	s.bytesIn.Store(1000 * 200 * 10) // 1000 viewers, 10 messages each, 200 B
+
+	got := s.snapshot(20 * time.Second)
+	if got.EgressPerViewerBps <= 0 {
+		t.Fatalf("egress per viewer = %v, want a positive rate", got.EgressPerViewerBps)
+	}
+	// 10 messages of 200 B over 20s is 100 B/s per viewer, whatever the total.
+	if got.EgressPerViewerBps < 95 || got.EgressPerViewerBps > 105 {
+		t.Errorf("egress per viewer = %.1f B/s, want about 100", got.EgressPerViewerBps)
+	}
+}
+
+func cfgWithConns(n int) config { return config{connections: n} }
 
 // The send-time map is the load generator's only unbounded structure. Deleting
 // on match is what keeps it bounded by the in-flight window rather than by the
@@ -89,19 +158,27 @@ func TestSentAtIsReleasedOnMatch(t *testing.T) {
 	if _, ok := s.sentAt.Load(uint64(1)); !ok {
 		t.Fatal("noteSent did not record the id")
 	}
-	s.recordTextFrame(nil, deliveryFrame("room:1", 1, ""))
+	s.recordTextFrame(nil, deliveryFrame("room:1", 1, ""), true)
 	if _, ok := s.sentAt.Load(uint64(1)); ok {
 		t.Error("the id survived its match; the map would grow with the run")
 	}
 }
 
-// A message this generator never published cannot be measured against, and must
-// not be counted as delivered.
-func TestUnmatchedDeliveryIsNotCounted(t *testing.T) {
+// A message this generator never published still reached a subscriber, so it
+// counts as delivered. It produces no latency sample, because there is no send
+// time to measure it against.
+func TestUnmatchedDeliveryCountsButTakesNoSample(t *testing.T) {
 	s := newSubscribers(config{})
-	s.recordTextFrame(nil, deliveryFrame("room:1", 999, ""))
-	if got := s.snapshot().Delivered; got != 0 {
-		t.Errorf("delivered = %d for a message that was never published, want 0", got)
+	s.recordTextFrame(nil, deliveryFrame("room:1", 999, "x"), true)
+
+	if got := s.snapshot(20 * time.Second).Delivered; got != 1 {
+		t.Errorf("delivered = %d for a delivery that happened, want 1", got)
+	}
+	s.mu.Lock()
+	n := len(s.latencies)
+	s.mu.Unlock()
+	if n != 0 {
+		t.Errorf("recorded %d latency samples for a message that was never published, want 0", n)
 	}
 }
 
@@ -215,8 +292,8 @@ func deliveryFrame(channel string, id uint64, body string) []byte {
 // carries no message id.
 func TestGapNoticeIsCounted(t *testing.T) {
 	s := newSubscribers(config{})
-	s.recordTextFrame(nil, []byte(`{"op":"gap","dropped":5,"reason":"slow_consumer"}`+"\n"))
-	if got := s.snapshot().GapNotices; got != 1 {
+	s.recordTextFrame(nil, []byte(`{"op":"gap","dropped":5,"reason":"slow_consumer"}`+"\n"), true)
+	if got := s.snapshot(20 * time.Second).GapNotices; got != 1 {
 		t.Errorf("gap notices = %d, want 1", got)
 	}
 }
@@ -231,8 +308,8 @@ func TestOneFrameCarryingSeveralMessagesIsFullyCounted(t *testing.T) {
 	joined := append(deliveryFrame("room:1", 1, "a"),
 		append(deliveryFrame("room:1", 2, "b"), deliveryFrame("room:1", 3, "c")...)...)
 
-	s.recordTextFrame(nil, joined)
-	if got := s.snapshot().Delivered; got != 3 {
+	s.recordTextFrame(nil, joined, true)
+	if got := s.snapshot(20 * time.Second).Delivered; got != 3 {
 		t.Errorf("delivered = %d from a frame carrying three messages, want 3", got)
 	}
 }

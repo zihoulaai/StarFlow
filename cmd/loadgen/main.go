@@ -36,6 +36,10 @@ type config struct {
 	reportPath  string
 	rampWindow  time.Duration
 	channelSpan int
+	// probeConnections is how many of the connections contribute a latency
+	// sample. The rest exist to give the instance something to deliver to, which
+	// is what makes the egress figures mean anything.
+	probeConnections int
 }
 
 // channels returns the channels subscribers spread across.
@@ -70,6 +74,7 @@ func main() {
 	flag.StringVar(&c.reportPath, "report", "", "write the report here as JSON")
 	flag.DurationVar(&c.rampWindow, "ramp", 30*time.Second, "how long to spread the connection ramp over")
 	flag.IntVar(&c.channelSpan, "channel-span", 1, "spread subscribers and publishes over this many channels")
+	flag.IntVar(&c.probeConnections, "probes", 8, "connections that contribute delivery-latency samples")
 	flag.Parse()
 
 	if c.tenant == "" || c.appKey == "" || c.secret == "" {
@@ -112,7 +117,7 @@ func main() {
 	report := gen.run(ctx)
 	report.print(os.Stdout)
 
-	delivery := subs.snapshot()
+	delivery := subs.snapshot(c.duration)
 	delivery.print(os.Stdout)
 	report.Delivery = &delivery
 	report.FanoutFactor = delivery.fanoutFactor(report.Accepted)
