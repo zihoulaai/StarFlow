@@ -51,6 +51,9 @@ func (s *Store) refresh(tenantID string) {
 	}
 }
 
+// ListTenants returns every tenant. It is not tenant-scoped: the surface it
+// serves is the operator's, who is granted a tenant per administrative call and
+// sees the whole set from the tenant list.
 func (s *Store) ListTenants(ctx context.Context) ([]admin.TenantView, error) {
 	tenants, err := s.CP.ListTenants(ctx)
 	if err != nil {
@@ -63,6 +66,7 @@ func (s *Store) ListTenants(ctx context.Context) ([]admin.TenantView, error) {
 	return out, nil
 }
 
+// GetTenant returns one tenant, or admin.ErrNotFound if there is no such row.
 func (s *Store) GetTenant(ctx context.Context, id string) (admin.TenantView, error) {
 	t, err := s.CP.GetTenant(ctx, id)
 	if err != nil {
@@ -71,6 +75,8 @@ func (s *Store) GetTenant(ctx context.Context, id string) (admin.TenantView, err
 	return admin.TenantView{ID: t.ID, Name: t.Name, CreatedAt: t.CreatedAt}, nil
 }
 
+// CreateTenant creates a tenant and reloads this instance's configuration for
+// it, so the new tenant can publish without a restart.
 func (s *Store) CreateTenant(ctx context.Context, name string) (admin.TenantView, error) {
 	t, err := s.CP.CreateTenant(ctx, controlplane.Tenant{Name: name})
 	if err != nil {
@@ -80,6 +86,8 @@ func (s *Store) CreateTenant(ctx context.Context, name string) (admin.TenantView
 	return admin.TenantView{ID: t.ID, Name: t.Name, CreatedAt: t.CreatedAt}, nil
 }
 
+// UpdateTenant renames a tenant. No reload follows: the name is not consulted
+// on the admission path, so the change cannot affect this instance's behaviour.
 func (s *Store) UpdateTenant(ctx context.Context, id, name string) (admin.TenantView, error) {
 	t, err := s.CP.UpdateTenant(ctx, id, func(dst *controlplane.Tenant) { dst.Name = name })
 	if err != nil {
@@ -88,6 +96,7 @@ func (s *Store) UpdateTenant(ctx context.Context, id, name string) (admin.Tenant
 	return admin.TenantView{ID: t.ID, Name: t.Name, CreatedAt: t.CreatedAt}, nil
 }
 
+// ListApplications returns the tenant's credentials.
 func (s *Store) ListApplications(ctx context.Context, tenantID string) ([]admin.AppView, error) {
 	apps, err := s.CP.ListApplications(ctx, tenantID)
 	if err != nil {
@@ -100,6 +109,10 @@ func (s *Store) ListApplications(ctx context.Context, tenantID string) ([]admin.
 	return out, nil
 }
 
+// GetApplication returns one credential, or admin.ErrNotFound.
+//
+// The view never carries the secret digest, so an operator cannot read one back
+// out of the API even with full administrative authority.
 func (s *Store) GetApplication(ctx context.Context, tenantID, id string) (admin.AppView, error) {
 	a, err := s.CP.GetApplication(ctx, tenantID, id)
 	if err != nil {
@@ -108,6 +121,12 @@ func (s *Store) GetApplication(ctx context.Context, tenantID, id string) (admin.
 	return appView(a), nil
 }
 
+// CreateApplication issues a credential and returns its plaintext secret.
+//
+// The secret is returned once, here, and is not recoverable afterwards: only a
+// digest is stored, so an operator who loses it must rotate. It is created
+// enabled, because a credential that exists but refuses every call is not a
+// state anyone asked for.
 func (s *Store) CreateApplication(ctx context.Context, tenantID, name string, canPublish, canSubscribe bool) (admin.AppView, string, error) {
 	a, secret, err := s.CP.CreateApplication(ctx, controlplane.Application{
 		TenantID:     tenantID,
@@ -123,6 +142,11 @@ func (s *Store) CreateApplication(ctx context.Context, tenantID, name string, ca
 	return appView(a), secret, nil
 }
 
+// SetApplicationEnabled enables or disables a credential.
+//
+// Disabling ends the connections the credential already holds, not only future
+// authentications. A credential switched off while its subscribers are live
+// would otherwise keep delivering to them indefinitely.
 func (s *Store) SetApplicationEnabled(ctx context.Context, tenantID, id string, enabled bool) (admin.AppView, error) {
 	a, err := s.CP.UpdateApplication(ctx, tenantID, id, func(dst *controlplane.Application) {
 		dst.Enabled = enabled
@@ -134,6 +158,9 @@ func (s *Store) SetApplicationEnabled(ctx context.Context, tenantID, id string, 
 	return appView(a), nil
 }
 
+// RotateSecret issues a new secret and returns it once, as CreateApplication
+// does. The previous secret keeps working until its own validity window closes,
+// so a client that has not yet picked up the new one is not cut off mid-deploy.
 func (s *Store) RotateSecret(ctx context.Context, tenantID, id string) (admin.AppView, string, error) {
 	a, secret, err := s.CP.RotateApplicationSecret(ctx, tenantID, id, 0)
 	if err != nil {
@@ -143,6 +170,7 @@ func (s *Store) RotateSecret(ctx context.Context, tenantID, id string) (admin.Ap
 	return appView(a), secret, nil
 }
 
+// GetQuota returns the tenant's ceilings, or admin.ErrNotFound.
 func (s *Store) GetQuota(ctx context.Context, tenantID string) (admin.QuotaView, error) {
 	q, err := s.CP.GetQuota(ctx, tenantID)
 	if err != nil {
@@ -151,6 +179,11 @@ func (s *Store) GetQuota(ctx context.Context, tenantID string) (admin.QuotaView,
 	return quotaView(q), nil
 }
 
+// SetQuota replaces the tenant's ceilings.
+//
+// Every field is taken from v, so a caller that omits one lowers it rather than
+// leaving it as it was. This is deliberate: a partial update against a quota
+// would read as clearing the limits the caller did not mention.
 func (s *Store) SetQuota(ctx context.Context, tenantID string, v admin.QuotaView) (admin.QuotaView, error) {
 	q, err := s.CP.UpsertQuota(ctx, controlplane.Quota{
 		TenantID:             tenantID,
@@ -167,6 +200,9 @@ func (s *Store) SetQuota(ctx context.Context, tenantID string, v admin.QuotaView
 	return quotaView(q), nil
 }
 
+// GetChannel returns a channel's configured limits joined with its live
+// subscriber count, which lives in this instance's data plane rather than in
+// the database and so is absent for every other instance.
 func (s *Store) GetChannel(ctx context.Context, tenantID, channel string) (admin.ChannelView, error) {
 	c, err := s.CP.GetChannelConfig(ctx, tenantID, channel)
 	if err != nil {
@@ -175,6 +211,14 @@ func (s *Store) GetChannel(ctx context.Context, tenantID, channel string) (admin
 	return s.channelView(tenantID, c), nil
 }
 
+// SetChannelLimit writes a channel's limits.
+//
+// hasCeiling is separate from ceiling because clearing an override and setting
+// it to zero are different operations: a zero ceiling would refuse every
+// publish, which is a valid thing for an operator to want and cannot be
+// expressed by the number alone. This costs two writes, because the control
+// plane models the override as a nullable column that a single upsert cannot
+// set and clear at once.
 func (s *Store) SetChannelLimit(ctx context.Context, tenantID, channel string, maxSubscribers int, ceiling float64, hasCeiling bool) (admin.ChannelView, error) {
 	c, err := s.CP.UpsertChannelConfig(ctx, controlplane.ChannelConfig{
 		TenantID:       tenantID,
@@ -256,6 +300,13 @@ type Authorizer struct {
 	CP *controlplane.Store
 }
 
+// RoleFor resolves the grant held by a principal, or an empty role if there is
+// none.
+//
+// An empty role and a nil error is the normal outcome for a caller with no
+// grant, so the admin server maps it to 401 rather than treating it as a
+// lookup failure. A stored role this build does not recognise also grants
+// nothing rather than defaulting.
 func (a *Authorizer) RoleFor(ctx context.Context, tenantID, subject string) (admin.Role, error) {
 	if tenantID == "" || subject == "" {
 		return "", nil
