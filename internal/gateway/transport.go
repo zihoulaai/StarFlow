@@ -18,7 +18,7 @@ import (
 // Subprotocol is the value the SDK negotiates.
 const Subprotocol = "push.v1"
 
-// Authenticator resolves a handshake credential to an identity.
+// authenticator resolves a handshake credential to an identity.
 //
 // Both forms are accepted because both are real credentials the service issues:
 // a signed token for publishers holding signing material, and an application
@@ -28,24 +28,24 @@ const Subprotocol = "push.v1"
 //
 // Both delegate to the same resolver the publish path uses, so a credential
 // cannot be valid for one transport and invalid for the other.
-type Authenticator interface {
+type authenticator interface {
 	Authenticate(ctx context.Context, token string) (auth.Identity, error)
 	AuthenticateSecret(ctx context.Context, appKey, secret string) (auth.Identity, error)
 }
 
-// ConnLimiter gates new connections against a tenant's ceiling. Nil disables the
+// connLimiter gates new connections against a tenant's ceiling. Nil disables the
 // check, which is only appropriate for tests.
-type ConnLimiter interface {
+type connLimiter interface {
 	AllowConnection(tenantID string, now time.Time) bool
 	ReleaseConnection(tenantID string)
 }
 
-// MetricsSink is the subset of the metrics registry the transport reports to.
+// metricsSink is the subset of the metrics registry the transport reports to.
 //
-// It is an interface rather than the concrete metrics type so the data plane does
-// not import the observability package, which keeps that dependency pointing one
-// way instead of forming a cycle with the wiring in cmd.
-type MetricsSink interface {
+// The registry has a much larger surface than the three events here, and the
+// transport is on the connection hot path, so naming what it needs keeps it from
+// depending on every metric the service collects.
+type metricsSink interface {
 	ConnectionOpened(tenantID string)
 	ConnectionClosed(tenantID string)
 	ObserveHeartbeatLost()
@@ -56,9 +56,9 @@ type TransportConfig struct {
 	Store     *Store
 	Shards    *ShardSet
 	Lifecycle *Lifecycle
-	Metrics   MetricsSink
-	Resolver  Authenticator
-	Limiter   ConnLimiter
+	Metrics   metricsSink
+	Resolver  authenticator
+	Limiter   connLimiter
 
 	// Policies resolves the per-channel policy for a tenant. A channel with no
 	// entry falls back to the engine's own limit.

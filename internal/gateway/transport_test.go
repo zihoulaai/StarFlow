@@ -61,7 +61,7 @@ func (c *countingMetrics) ConnectionOpened(string) { c.mu.Lock(); c.opened++; c.
 func (c *countingMetrics) ConnectionClosed(string) { c.mu.Lock(); c.closed++; c.mu.Unlock() }
 func (c *countingMetrics) ObserveHeartbeatLost()   {}
 
-func newTestTransport(t *testing.T, r Authenticator, lim ConnLimiter) (*Transport, *Store, *Lifecycle, *countingMetrics) {
+func newTestTransport(t *testing.T, r authenticator, lim connLimiter) (*Transport, *Store, *Lifecycle, *countingMetrics) {
 	t.Helper()
 	store := NewStore()
 	shards := NewShardSet(8)

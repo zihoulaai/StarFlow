@@ -32,15 +32,15 @@ type TenantConfig struct {
 	LoadedAt time.Time
 }
 
-// Loader reads a tenant's configuration from the durable store.
-type Loader interface {
+// loader reads a tenant's configuration from the durable store.
+type loader interface {
 	Load(ctx context.Context, tenantID string) (TenantConfig, error)
 }
 
 // StoreLoader reads snapshots from a control-plane Store.
 type StoreLoader struct{ store *Store }
 
-// NewStoreLoader returns a Loader backed by store.
+// NewStoreLoader returns a loader backed by store.
 func NewStoreLoader(store *Store) StoreLoader { return StoreLoader{store: store} }
 
 // Load assembles a tenant's configuration.
@@ -97,7 +97,7 @@ func (l StoreLoader) Load(ctx context.Context, tenantID string) (TenantConfig, e
 // It never queries the store there, which is what keeps the data plane free of
 // network calls.
 type ConfigCache struct {
-	loader Loader
+	loader loader
 	bus    bus.ConfigBus
 
 	mu     sync.RWMutex
@@ -107,7 +107,7 @@ type ConfigCache struct {
 }
 
 // NewConfigCache returns a cache backed by loader.
-func NewConfigCache(loader Loader) *ConfigCache {
+func NewConfigCache(loader loader) *ConfigCache {
 	return &ConfigCache{loader: loader, byName: map[string]*TenantConfig{}}
 }
 

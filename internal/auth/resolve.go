@@ -21,17 +21,17 @@ type Resolver struct {
 	cache  *controlplane.ConfigCache
 	// auditor records authentication outcomes. It is optional so the resolver
 	// can be exercised without a store.
-	auditor Auditor
+	auditor auditor
 	now     func() time.Time
 }
 
-// Auditor records authentication decisions.
-type Auditor interface {
+// auditor records authentication decisions.
+type auditor interface {
 	RecordAuthFailure(ctx context.Context, tenantID, subject, appKey, reason string)
 }
 
 // NewResolver returns a Resolver.
-func NewResolver(signer *Signer, cache *controlplane.ConfigCache, auditor Auditor, now func() time.Time) *Resolver {
+func NewResolver(signer *Signer, cache *controlplane.ConfigCache, auditor auditor, now func() time.Time) *Resolver {
 	if now == nil {
 		now = time.Now
 	}
