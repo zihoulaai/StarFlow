@@ -13,7 +13,11 @@ import (
 
 type harness struct {
 	pipeline *Pipeline
-	now      time.Time
+	// matcher is the automaton the pipeline was built with. The harness holds
+	// it because it also owns rule loading; reaching back through the pipeline
+	// for it would mean adding an accessor to the production type for tests.
+	matcher moderation.Matcher
+	now     time.Time
 
 	canPublish  bool
 	tenantAllow bool
@@ -58,6 +62,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("NewIDGen: %v", err)
 	}
 	h := &harness{
+		matcher:     moderation.NewAutomaton(),
 		now:         time.UnixMilli(1_700_000_000_000),
 		canPublish:  true,
 		tenantAllow: true,
@@ -68,7 +73,7 @@ func newHarness(t *testing.T) *harness {
 		dedupWindow: 3 * time.Second,
 		dupContent:  true,
 	}
-	matcher := moderation.NewAutomaton()
+	matcher := h.matcher
 	// A tenant with no configured words still has a loaded, empty matcher. The
 	// distinction matters: an unloaded matcher fails closed and would block every
 	// publish, which is the correct behaviour for a serving instance that has not
@@ -111,9 +116,6 @@ func newHarness(t *testing.T) *harness {
 	return h
 }
 
-// Matcher exposes the pipeline's matcher for test setup.
-func (p *Pipeline) Matcher() moderation.Matcher { return p.deps.Matcher }
-
 // reloadWords installs a moderation rule for the harness's tenant.
 func (h *harness) reloadWords(t *testing.T, r controlplane.ModerationRule) {
 	t.Helper()
@@ -122,7 +124,7 @@ func (h *harness) reloadWords(t *testing.T, r controlplane.ModerationRule) {
 		r.Kind = controlplane.RuleKindSensitiveWord
 	}
 	r.Enabled = true
-	if err := h.pipeline.Matcher().Reload("t1", []controlplane.ModerationRule{r}); err != nil {
+	if err := h.matcher.Reload("t1", []controlplane.ModerationRule{r}); err != nil {
 		t.Fatalf("Reload rule %q: %v", r.Pattern, err)
 	}
 }
@@ -209,7 +211,7 @@ func TestPermissionRefusal(t *testing.T) {
 func TestStageOrderIsObservable(t *testing.T) {
 	t.Run("moderation before size", func(t *testing.T) {
 		h := newHarness(t)
-		if err := h.pipeline.Matcher().Reload("t1", []controlplane.ModerationRule{{
+		if err := h.matcher.Reload("t1", []controlplane.ModerationRule{{
 			TenantID: "t1", Pattern: "forbidden", Action: controlplane.ActionBlock,
 			Kind: controlplane.RuleKindSensitiveWord, Enabled: true, ID: "r1",
 		}}); err != nil {
@@ -428,7 +430,7 @@ func TestPublishFailurePolicies(t *testing.T) {
 
 func TestModerationBlockReachesNoSubscriber(t *testing.T) {
 	h := newHarness(t)
-	if err := h.pipeline.Matcher().Reload("t1", []controlplane.ModerationRule{{
+	if err := h.matcher.Reload("t1", []controlplane.ModerationRule{{
 		TenantID: "t1", Pattern: "forbidden", Action: controlplane.ActionBlock,
 		Kind: controlplane.RuleKindSensitiveWord, Enabled: true, ID: "r1",
 	}}); err != nil {
@@ -452,7 +454,7 @@ func TestModerationBlockReachesNoSubscriber(t *testing.T) {
 
 func TestModerationReplacementIsApplied(t *testing.T) {
 	h := newHarness(t)
-	if err := h.pipeline.Matcher().Reload("t1", []controlplane.ModerationRule{{
+	if err := h.matcher.Reload("t1", []controlplane.ModerationRule{{
 		TenantID: "t1", Pattern: "badword", Action: controlplane.ActionReplace,
 		Replacement: "***", Kind: controlplane.RuleKindSensitiveWord,
 		Enabled: true, ID: "r1",
@@ -476,7 +478,7 @@ func TestModerationReplacementIsApplied(t *testing.T) {
 // shrinks content can bring an otherwise oversized message inside the limit.
 func TestSizeAppliesAfterReplacement(t *testing.T) {
 	h := newHarness(t)
-	if err := h.pipeline.Matcher().Reload("t1", []controlplane.ModerationRule{{
+	if err := h.matcher.Reload("t1", []controlplane.ModerationRule{{
 		TenantID: "t1", Pattern: "badword", Action: controlplane.ActionReplace,
 		Replacement: "*", Kind: controlplane.RuleKindSensitiveWord,
 		Enabled: true, ID: "r1",

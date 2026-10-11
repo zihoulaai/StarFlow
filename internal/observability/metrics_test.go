@@ -192,15 +192,13 @@ func TestLatencyBreachFiresAndNamesItsScope(t *testing.T) {
 	if a.Condition.Scope == "" {
 		t.Error("alert has no scope; a page must say what it is about")
 	}
-	if a.Severity() != "critical" {
-		t.Errorf("severity = %q, want critical", a.Severity())
+	if a.Condition.Severity != "critical" {
+		t.Errorf("severity = %q, want critical", a.Condition.Severity)
 	}
 	if a.Value == "" {
 		t.Error("alert carries no figure")
 	}
 }
-
-func (a Alert) Severity() string { return a.Condition.Severity }
 
 // A sustained breach produces one alert, not one per scrape.
 func TestAlertDoesNotRepeatWhileHeld(t *testing.T) {

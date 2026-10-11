@@ -282,7 +282,7 @@ func TestCoalescerMergesWithinWindow(t *testing.T) {
 	c := NewCoalescer("t1", "room:1", 10, 20, 64*1024)
 
 	for i := uint64(1); i <= 5; i++ {
-		c.AddMsg(protocol.Message{ID: i, TimeMs: 1000, Body: []byte("x")})
+		c.addMsg(protocol.Message{ID: i, TimeMs: 1000, Body: []byte("x")})
 	}
 	if c.Pending() != 5 {
 		t.Errorf("Pending = %d, want 5", c.Pending())
@@ -332,8 +332,8 @@ func TestCoalescingCutsPacketsNotBytes(t *testing.T) {
 	// window is due, and only then take.
 	for i := uint64(1); i <= messageCount; i++ {
 		m := protocol.Message{ID: i, TimeMs: 1000, Body: body}
-		unmerged.AddMsg(m)
-		merged.AddMsg(m)
+		unmerged.addMsg(m)
+		merged.addMsg(m)
 		if unmerged.Due(1000) {
 			if f := unmerged.Take(); f != nil {
 				unmergedBytes += len(f)
@@ -388,7 +388,7 @@ func TestCoalescingCutsPacketsNotBytes(t *testing.T) {
 
 func TestCoalescerClosesOnWindowExpiry(t *testing.T) {
 	c := NewCoalescer("t1", "room:1", 10, 20, 64*1024)
-	c.AddMsg(protocol.Message{ID: 1, TimeMs: 1000, Body: []byte("x")})
+	c.addMsg(protocol.Message{ID: 1, TimeMs: 1000, Body: []byte("x")})
 
 	if c.Due(1005) {
 		t.Error("window closed before its interval elapsed")
@@ -410,7 +410,7 @@ func TestCoalescerClosesOnByteBound(t *testing.T) {
 	body := make([]byte, 256)
 	dueAt := -1
 	for i := 0; i < 20; i++ {
-		c.AddMsg(protocol.Message{ID: uint64(i + 1), TimeMs: 1000, Body: body})
+		c.addMsg(protocol.Message{ID: uint64(i + 1), TimeMs: 1000, Body: body})
 		if c.Due(1000) && dueAt < 0 {
 			dueAt = i + 1
 			break
@@ -437,7 +437,7 @@ func TestCoalescerClosesOnByteBound(t *testing.T) {
 func TestCoalescerClosesAtMergeTarget(t *testing.T) {
 	c := NewCoalescer("t1", "room:1", 100000, 5, 1<<20)
 	for i := uint64(1); i <= 5; i++ {
-		c.AddMsg(protocol.Message{ID: i, TimeMs: 1000, Body: []byte("x")})
+		c.addMsg(protocol.Message{ID: i, TimeMs: 1000, Body: []byte("x")})
 	}
 	if !c.Due(1000) {
 		t.Error("window did not close at the merge target")
@@ -460,7 +460,7 @@ func TestCoalescingCanBeDisabled(t *testing.T) {
 	c := NewCoalescer("t1", "room:1", 10000, 1000, 1<<20)
 	c.SetMergeRatio(1)
 
-	c.AddMsg(protocol.Message{ID: 1, TimeMs: 1000, Body: []byte("a")})
+	c.addMsg(protocol.Message{ID: 1, TimeMs: 1000, Body: []byte("a")})
 	if !c.Due(1000) {
 		t.Error("with a merge ratio of 1 the window should close immediately")
 	}
@@ -478,10 +478,10 @@ func TestCoalescingCanBeDisabled(t *testing.T) {
 // bytes regardless of how many subscribers receive it.
 func TestCoalescerFrameIsRecipientIndependent(t *testing.T) {
 	c := NewCoalescer("t1", "room:1", 10, 20, 64*1024)
-	c.AddMsg(protocol.Message{ID: 1, TimeMs: 1000, Body: []byte("hello")})
+	c.addMsg(protocol.Message{ID: 1, TimeMs: 1000, Body: []byte("hello")})
 	first := c.Take()
 
-	c.AddMsg(protocol.Message{ID: 1, TimeMs: 1000, Body: []byte("hello")})
+	c.addMsg(protocol.Message{ID: 1, TimeMs: 1000, Body: []byte("hello")})
 	second := c.Take()
 
 	if len(first) != len(second) {

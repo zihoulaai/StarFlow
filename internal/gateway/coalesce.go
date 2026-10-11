@@ -194,9 +194,11 @@ func (c *Coalescer) TenantID() string { return c.tenant }
 // ChannelName returns the channel this coalescer belongs to.
 func (c *Coalescer) ChannelName() string { return c.channel }
 
-// AddMsg queues a message using its own timestamp as the arrival time. It exists
-// for tests and for callers that already hold a timestamp they consider
-// authoritative; the delivery path uses Add with an explicit arrival time.
-func (c *Coalescer) AddMsg(m protocol.Message) {
+// addMsg queues a message using its own timestamp as the arrival time.
+//
+// The delivery path always passes an explicit arrival time via Add; this
+// shorthand exists for a caller that already holds an authoritative one, and is
+// not exported because nothing outside the package does.
+func (c *Coalescer) addMsg(m protocol.Message) {
 	c.Add(m, m.TimeMs)
 }

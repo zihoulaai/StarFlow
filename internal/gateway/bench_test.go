@@ -197,7 +197,7 @@ func BenchmarkCoalesceEncode(b *testing.B) {
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		for i := 0; i < 20; i++ {
-			c.AddMsg(messageN(uint64(n*20+i), body))
+			c.addMsg(messageN(uint64(n*20+i), body))
 		}
 		c.Take()
 	}
