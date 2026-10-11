@@ -191,8 +191,8 @@ func (c *Coalescer) SetWindow(windowMs uint64) {
 // TenantID returns the tenant this coalescer belongs to.
 func (c *Coalescer) TenantID() string { return c.tenant }
 
-// ChannelName returns the channel this coalescer belongs to.
-func (c *Coalescer) ChannelName() string { return c.channel }
+// Channel returns the channel this coalescer belongs to.
+func (c *Coalescer) Channel() string { return c.channel }
 
 // addMsg queues a message using its own timestamp as the arrival time.
 //

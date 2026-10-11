@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -284,13 +285,31 @@ func TestBusContract(t *testing.T) {
 // The envelope must carry no subscriber information, because the fanout path
 // shares one encoded body across every recipient of a channel. A field that
 // varied per subscriber would break that sharing silently.
+// The envelope crosses every instance boundary, so it must carry nothing that
+// identifies one gateway's subscribers: a recipient field would turn a fanout
+// into a point-to-point delivery the moment an intermediate gateway set it.
+//
+// The guard is on the field set rather than on a copy: copying a struct is
+// always faithful, so comparing two copies asserted nothing and would have kept
+// passing after a recipient field was added.
 func TestEnvelopeCarriesNoSubscriberIdentity(t *testing.T) {
-	env := bus.Envelope{TenantID: "t1", Channel: "room:1", MessageID: 1}
-	// A compile-time guard: the struct must not grow a recipient field without
-	// this test being reconsidered. Comparing two envelopes that differ only in
-	// tenant-scoped addressing must produce identical routing-relevant bytes.
-	clone := env
-	if clone.MessageID != env.MessageID || clone.Channel != env.Channel {
-		t.Fatal("envelope copy is not faithful")
+	want := map[string]bool{
+		"TenantID": true, "Channel": true, "MessageID": true,
+		"TimeMs": true, "ExpiresAtMs": true, "Class": true,
+		"Flags": true, "Tag": true, "Body": true,
+	}
+
+	typ := reflect.TypeOf(bus.Envelope{})
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		if !want[f.Name] {
+			t.Errorf("Envelope gained field %q of type %s; the envelope is broadcast, "+
+				"so it must not carry anything that identifies one gateway's subscribers",
+				f.Name, f.Type)
+		}
+		delete(want, f.Name)
+	}
+	for name := range want {
+		t.Errorf("Envelope lost field %q", name)
 	}
 }

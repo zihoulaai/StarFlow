@@ -87,7 +87,7 @@ func (s *CoalescerSet) FlushDue(f *Fanout) int {
 		if err != nil {
 			continue
 		}
-		if _, err := f.deliver(d.c.TenantID(), d.c.ChannelName(), *batch, nowMs); err != nil {
+		if _, err := f.deliver(d.c.TenantID(), d.c.Channel(), *batch, nowMs); err != nil {
 			continue
 		}
 		delivered++

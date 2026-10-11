@@ -50,13 +50,10 @@ func NewShardSet(n int) *ShardSet {
 	return set
 }
 
-// Shard returns the shard owning a connection id.
-func (s *ShardSet) Shard(connID uint64) *shard {
+// For returns the shard a connection belongs to.
+func (s *ShardSet) For(connID uint64) *shard {
 	return s.shards[connID&s.mask]
 }
-
-// ShardCount reports how many shards exist.
-func (s *ShardSet) ShardCount() int { return len(s.shards) }
 
 // add registers a connection for the current pass.
 //

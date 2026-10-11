@@ -284,6 +284,12 @@ func (c *Conn) Accepting() bool { return c.State() == ConnOpen }
 
 // Close performs the transport close exactly once, whichever of drain or
 // heartbeat timeout gets there first.
+//
+// It closes the socket and nothing else: subscriptions stay registered and the
+// connection stays tracked, so a closed connection would keep appearing in
+// channel subscriber counts and skew the limits derived from them. Callers that
+// are releasing a connection rather than just its transport want Lifecycle.Close,
+// which unsubscribes and untracks first.
 func (c *Conn) Close() {
 	c.closeOnce.Do(func() {
 		c.state.Store(int32(ConnClosed))
@@ -331,7 +337,7 @@ func (c *Conn) registerDirty(nowMs uint64) {
 	if !c.dirty.Swap(true) {
 		c.queuedAtMs.Store(nowMs)
 		if c.shards != nil {
-			c.shards.Shard(c.ID).add(c)
+			c.shards.For(c.ID).add(c)
 		}
 	}
 }
